@@ -1,34 +1,59 @@
-#ifndef IVI_MAP_H
-#define IVI_MAP_H
+/* File name     :  ivi_map.h
+ * Author        :  Wentao Shang
+ * 
+ * Contents      :
+ *    This file is the header file for the 'ivi_map.c' file,
+ *    which contains all the system header files and definitions
+ *    used in the 'nfivi_map.c' file.
+ *
+ */
 
-#include <linux/in6.h>
+#ifndef NFIVI_MAP_H
+#define NFIVI_MAP_H
+
+#include <linux/module.h>
+
+#include <linux/time.h>
+#include <linux/list.h>
+#include <linux/slab.h>
+#include <linux/spinlock.h>
 #include "ivi_config.h"
 
-// public structure definitions
-
-struct rt_4to6_entry {
-	unsigned int	v4prefix;
-	unsigned short	v4len;
-	unsigned char	v6prefix[IVI_PREFIXLEN];
+/* map entry structure */
+struct map_tuple {
+	struct list_head node;
+	__be32 oldaddr;
+	__be16 oldport;
+	__be16 newport;
+	struct timeval timer;
 };
 
-#ifdef __KERNEL__
+/* map list structure */
+struct map_list {
+	spinlock_t lock;
+	struct list_head chain;
+	int size;
+	time_t timeout;
+	__be16 last_alloc;
+	__u8 used[65536];
+};
 
-// global function prototypes
+/* global map list variables */
+extern __be16 ratio;
+extern __be16 offset;
 
-extern int add_4to6_entry(struct rt_4to6_entry *entry);
-extern int del_4to6_entry(struct rt_4to6_entry *entry);
-extern int count_4to6(void);
-extern int list_4to6(struct rt_4to6_entry *rt, const int maxcount);
+extern struct map_list tcp_list;
+extern struct map_list udp_list;
+extern struct map_list icmp_list;
 
-extern int add_6to4_entry(struct in6_addr *entry);
-extern int del_6to4_entry(struct in6_addr *entry);
-extern int count_6to4(void);
-extern int list_6to4(struct in6_addr *rt, const int maxcount);
+/* list operations */
+extern void init_map_list(struct map_list *list, time_t timeout);
+extern void refresh_map_list(struct map_list *list);
+extern void free_map_list(struct map_list *list);
 
-extern int umap_4to6(unsigned int *v4addr, struct in6_addr *v6addr);
-extern int umap_6to4(struct in6_addr *v6addr, unsigned int *v4addr);
+/* mapping operations */
+extern int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp);
+extern int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __be16 *oldp);
 
-#endif /* __KERNEL__ */
+#endif
 
-#endif /* IVI_MAP_H */

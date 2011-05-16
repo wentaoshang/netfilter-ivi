@@ -1,4 +1,4 @@
-all:	ivimap ivictl
+all:	ivictl
 
 clean:
-	rm -rf ivimap ivictl
+	rm -rf ivictl

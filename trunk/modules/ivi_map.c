@@ -1,493 +1,246 @@
-/*
- * ivi_map.c :
- *  IVI Address Mapping Kernel Module
+/* File name    :  ivi_map.c
+ * Author       :  Wentao Shang
  *
- * by haoyu@cernet.edu.cn 2008.10.09
+ * Contents     :
+ *	This file defines the generic mapping list data structure and basic 
+ *	operations, which will be used in other modules. 'ivi_map' module 
+ *	will be installed first when running './control start' command.
  *
- * Changes:
- *	Wentao Shang	:	Remove multicast functionality.
  */
-#ifdef MODVERSIONS
-#include <linux/modversions.h>
-#endif
-#include <linux/module.h>
-#include <linux/slab.h>
+
 #include "ivi_map.h"
 
-static struct rtree_4to6 {
-	struct rt_4to6_entry *rt;
-	struct rtree_4to6 *lptr, *rptr;
-} tree46;
+struct map_list tcp_list;
+EXPORT_SYMBOL(tcp_list);
 
-static struct rtree_6to4 {
-	struct in6_addr *rt;
-	struct rtree_6to4 *ptr[256];
-} tree64;
+struct map_list udp_list;
+EXPORT_SYMBOL(udp_list);
 
-static struct rcache_4to6 {
-	unsigned int v4addr;
-	struct rt_4to6_entry *rt;
-} rcache[131072];  // 0x20000 = 0xFFFF + 0xFFFF + 2
+struct map_list icmp_list;
+EXPORT_SYMBOL(icmp_list);
 
-static int counter46, counter64;
 
-int add_4to6_entry(struct rt_4to6_entry *entry) {
-	struct rtree_4to6 *ptr, *new_ptr;
-	int i;
-	unsigned int mask = 0x80000000;
+/* ratio and offset together indicate the port pool range */
+__be16 ratio = 1;
+EXPORT_SYMBOL(ratio);
+
+__be16 offset = 0;
+EXPORT_SYMBOL(offset);
+
+/* list operations */
+
+// Get current size of the list, must be protected by spin lock when calling this function
+static __inline int get_list_size(struct map_list *list)
+{
+	return list->size;
+}
+
+// Init list
+void init_map_list(struct map_list *list, time_t timeout)
+{
+	spin_lock_init(&list->lock);
+	INIT_LIST_HEAD(&list->chain);
+	list->size = 0;
+	list->timeout = timeout;
+	list->last_alloc = 0;
+	memset(list->used, 0, 65536 * sizeof(__u8));
+}
+EXPORT_SYMBOL(init_map_list);
+
+// Check whether a port is in use now, must be protected by spin lock when calling this function
+static __inline int port_in_use(unsigned int port, struct map_list *list)
+{
+	return (list->used[port]);
+}
+
+// Add a new map, the pointer to the new map_tuple is returned on success, must be protected by spin lock when calling this function
+struct map_tuple* add_new_map(__be32 oldaddr, __be16 oldp, __be16 newp, __be16 last, struct map_list *list)
+{
+	struct map_tuple *map;
+	map = (struct map_tuple*)kmalloc(sizeof(struct map_tuple), GFP_ATOMIC);
+	if (map == NULL) {
+		printk("add_new_map: kmalloc failed for map_tuple.\n");
+		return NULL;
+	}
 	
-	ptr = &tree46;
-	for (i = 0; i < entry->v4len; i++) {
-		if ((entry->v4prefix & mask) == 0) {
-			if (ptr->lptr == NULL) {
-				if ((new_ptr = (struct rtree_4to6 *)kmalloc(sizeof(struct rtree_4to6), GFP_KERNEL)) == NULL) {
-					printk(KERN_ERR "failed to allocate memory for routing tree node.\n");
-					return -ENOMEM;
-				}
-				new_ptr->rt = NULL;
-				new_ptr->lptr = NULL;
-				new_ptr->rptr = NULL;
-				ptr->lptr = new_ptr;
-			}
-			ptr = ptr->lptr;
-		}
-		else {
-			if (ptr->rptr == NULL) {
-				if ((new_ptr = (struct rtree_4to6 *)kmalloc(sizeof(struct rtree_4to6), GFP_KERNEL)) == NULL) {
-					printk(KERN_ERR "failed to allocate memory for routing tree node.\n");
-					return -ENOMEM;
-				}
-				new_ptr->rt = NULL;
-				new_ptr->lptr = NULL;
-				new_ptr->rptr = NULL;
-				ptr->rptr = new_ptr;
-			}
-			ptr = ptr->rptr;
-		}
-		mask >>= 1;
-	}
-
-	if (ptr->rt != NULL) { // if entry for the same prefix is already exist
-		printk(KERN_WARNING "entry for the same prefix exists, new entry is not inserted.\n");
-		kfree(entry);
-		return -EEXIST;
-	}
-
-	ptr->rt = entry;
-	counter46++;
-	for (i = 0; i < 131072; i++) {
-		rcache[i].v4addr = 0;
-	}
+	map->oldaddr = oldaddr;
+	map->oldport = oldp;
+	map->newport = newp;
+	do_gettimeofday(&map->timer);
+	
+	list_add(&map->node, &list->chain);
+	list->size++;
+	list->last_alloc = last;
+	list->used[newp] = 1;
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "new 4-to-6 mapping entry successfully inserted, now we have %d entries.\n", counter46);
+	printk("add_new_map: new map added: %x:%d -> %d.\n", oldaddr, oldp, newp );
 #endif
-	return 0;
-}
-EXPORT_SYMBOL(add_4to6_entry);
-
-static void del_4to6_recursive(struct rtree_4to6 *ptr) {
-	if (ptr->lptr != NULL) {
-		del_4to6_recursive(ptr->lptr);
-	}
-	if (ptr->rptr != NULL) {
-		del_4to6_recursive(ptr->rptr);
-	}
-	if (ptr->rt != NULL) {
-		kfree(ptr->rt);
-	}
-	kfree(ptr);
+	return map;
 }
 
-int del_4to6_entry(struct rt_4to6_entry *entry) {
-	struct rtree_4to6 *ptr, *last_ptr;
-	int i, side;
-	unsigned int mask = 0x80000000;
-
-	last_ptr = ptr = &tree46;
-	side = (entry->v4prefix & mask) >> 31;
+// Refresh the timer for each map_tuple, must NOT acquire spin lock when calling this function
+void refresh_map_list(struct map_list *list)
+{
+	struct map_tuple *iter;
+	struct map_tuple *temp;
+	struct timeval now;
+	time_t delta;
+	do_gettimeofday(&now);
 	
-	for (i = 0; i < entry->v4len; i++) {
-		if ((entry->v4prefix & mask) == 0) {
-			if ((ptr->rt != NULL) || (ptr->rptr != NULL)) {
-				last_ptr = ptr;
-				side = 0;
-			}
-			if (ptr->lptr != NULL) {
-				ptr = ptr->lptr;
-			}
-			else {
-				printk(KERN_WARNING "cannot find entry for specified prefix, entry is not deleted.\n");
-				kfree(entry);
-				return -ENXIO;
-			}
-		}
-		else {
-			if ((ptr->rt != NULL) || (ptr->lptr != NULL)) {
-				last_ptr = ptr;
-				side = 1;
-			}
-			if (ptr->rptr != NULL) {
-				ptr = ptr->rptr;
-			}
-			else {
-				printk(KERN_WARNING "cannot find entry for specified prefix, entry is not deleted.\n");
-				kfree(entry);
-				return -ENXIO;
-			}
-		}
-		mask >>= 1;
-	}
-
-	if (ptr->rt == NULL) {
-		printk(KERN_WARNING "cannot find entry for specified prefix, entry is not deleted.\n");
-		kfree(entry);
-		return -ENXIO;
-	}
-
-	if ((ptr->lptr != NULL) || (ptr->rptr != NULL)) { // there is longer prefix under this branch
-		kfree(ptr->rt);
-		ptr->rt = NULL;
-		kfree(entry);
-	}
-	else {
-		if (side == 0) {
-			del_4to6_recursive(last_ptr->lptr);
-			last_ptr->lptr = NULL;
-		}
-		else {
-			del_4to6_recursive(last_ptr->rptr);
-			last_ptr->rptr = NULL;
-		}
-	}
-	counter46--;
-	for (i = 0; i < 131072; i++) {
-		rcache[i].v4addr = 0;
-	}
+	spin_lock_bh(&list->lock);
+	list_for_each_entry_safe(iter, temp, &list->chain, node) {
+		delta = now.tv_sec - iter->timer.tv_sec;
+		if (delta >= list->timeout) {
+			list_del(&iter->node);
+			list->size--;
+			list->used[iter->newport] = 0;
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "4-to-6 mapping entry successfully deleted, now we have %d entries.\n", counter46);
+			printk("refresh_map_list: map %x:%d -> %d time out.\n", iter->oldaddr, iter->oldport, iter->newport);
 #endif
-	return 0;
+			kfree(iter);
+		}
+	}
+	spin_unlock_bh(&list->lock);
 }
-EXPORT_SYMBOL(del_4to6_entry);
+EXPORT_SYMBOL(refresh_map_list);
 
-int count_4to6(void) {
-	return counter46;
-}
-EXPORT_SYMBOL(count_4to6);
-
-int list_4to6(struct rt_4to6_entry *rt, const int maxcount) {
-	struct rtree_4to6 *stack[32]; //maximum stack depth for IPv4 prefix is 32-bit
-	int iterate[32];
-	int i = 0, ptr = 0;
+// Clear the entire list, must NOT acquire spin lock when calling this function
+void free_map_list(struct map_list *list)
+{
+	struct map_tuple *iter;
+	struct map_tuple *temp;
 	
-	memset (stack, 0, sizeof(struct rtree_4to6 *) * 32);
-	stack[0] = &tree46;
-	iterate[0] = 0;
-	while (ptr >= 0) {
-		switch (iterate[ptr]) {
-			case 0:
-				iterate[ptr] = 1;
-				if (stack[ptr]->lptr != NULL) {
-					stack[ptr + 1] = stack[ptr]->lptr;
-					iterate[ptr + 1] = 0;
-					ptr++;
-				}
+	spin_lock_bh(&list->lock);
+	list_for_each_entry_safe(iter, temp, &list->chain, node) {
+		list_del(&iter->node);
+		list->size--;
+#ifdef IVI_DEBUG
+		printk("free_map_list: map %d -> %d deleted.\n", iter->oldport, iter->newport);
+#endif
+		kfree(iter);
+	}
+	memset(list->used, 0, 65536 * sizeof(__u8));
+	spin_unlock_bh(&list->lock);
+}
+EXPORT_SYMBOL(free_map_list);
+
+
+/* mapping operations */
+
+// Get mapped port for outflow packet, input and output are in host byte order, return -1 if failed
+int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp)
+{
+	__be16 retport;
+	
+	refresh_map_list(list);
+	
+	*newp = 0;
+	
+	spin_lock_bh(&list->lock);
+	
+	if (get_list_size(list) >= (int)(64513 / ratio)) {
+		spin_unlock_bh(&list->lock);
+		printk("get_outflow_map_port: map list full.\n");
+		return -1;
+	}
+	
+	retport = 0;
+	
+	if (!list_empty(&list->chain)) {
+		struct map_tuple *iter;
+		list_for_each_entry(iter, &list->chain, node) {
+			if (iter->oldport == oldp && iter->oldaddr == oldaddr) {
+				retport = iter->newport;
+				do_gettimeofday(&iter->timer);
+				printk("get_outflow_map_port: find map %x:%d -> %d.\n", oldaddr, oldp, retport);
 				break;
-			case 1:
-				iterate[ptr] = 2;
-				if (stack[ptr]->rptr != NULL) {
-					stack[ptr + 1] = stack[ptr]->rptr;
-					iterate[ptr + 1] = 0;
-					ptr++;
-				}
+			}
+		}
+	}
+	
+	if (retport == 0) {
+		int remaining;
+		__be16 rover, low, high;
+		
+		low = (__u16)(1023 / ratio) + 1;
+		high = (__u16)(65536 / ratio) - 1;
+		remaining = (high - low) + 1;
+
+		if (list->last_alloc != 0)
+			rover = list->last_alloc + 1;
+		else
+			rover = low;
+		
+		do { 
+			retport = rover * ratio + offset;
+			if (!port_in_use(retport, list))
 				break;
-			case 2:
-				if (stack[ptr]->rt != NULL) {
-					if (i >= maxcount) {
-						printk(KERN_WARNING "actual mapping entry number is larger than counter.\n");
-						return -ENOMEM;
-					}
-					memcpy(rt + i, stack[ptr]->rt, sizeof(struct rt_4to6_entry));
-					i++;
-				}
-				ptr--;
-				break;
+			
+			if (++rover > high)
+				rover = low;
+			
+		} while (--remaining > 0);
+		
+		if (remaining <= 0) {
+			spin_unlock_bh(&list->lock);
+			printk("get_outflow_map_port: failed to assign a new map port for port: %d.\n", oldp);
+			return -1;
+		}
+		
+		if (add_new_map(oldaddr, oldp, retport, rover, list) == NULL) {
+			spin_unlock_bh(&list->lock);
+			return -1;
 		}
 	}
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "successfully returned %d 4-to-6 mapping entries.\n", i);
-#endif
-	return i;
-}
-EXPORT_SYMBOL(list_4to6);
-
-int add_6to4_entry(struct in6_addr *entry) {
-	struct rtree_6to4 *ptr, *new_ptr;
-	int i, j;
 	
-	ptr = &tree64;
-	for (i = 0; i < IVI_PREFIXLEN; i++) {
-		if (ptr->ptr[entry->s6_addr[i]] == NULL) {
-				if ((new_ptr = (struct rtree_6to4 *)kmalloc(sizeof(struct rtree_6to4), GFP_KERNEL)) == NULL) {
-					printk(KERN_ERR "failed to allocate memory for routing tree node.\n");
-					return -ENOMEM;
-				}
-				new_ptr->rt = NULL;
-				for (j = 0; j < 256; j++) {
-					new_ptr->ptr[j] = NULL;
-				}
-				ptr->ptr[entry->s6_addr[i]] = new_ptr;
-			}
-			ptr = ptr->ptr[entry->s6_addr[i]];
-	}
-
-	if (ptr->rt != NULL) { // if entry for the same prefix is already exist
-		printk(KERN_WARNING "entry for the same prefix exists, new entry is not inserted.\n");
-		kfree(entry);
-		return -EEXIST;
-	}
-
-	ptr->rt = entry;
-	counter64++;
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "new 6-to-4 mapping entry successfully inserted, now we have %d entries.\n", counter46);
-#endif
+	spin_unlock_bh(&list->lock);
+	
+	*newp = retport;
+	
 	return 0;
 }
-EXPORT_SYMBOL(add_6to4_entry);
+EXPORT_SYMBOL(get_outflow_map_port);
 
-static void del_6to4_recursive(struct rtree_6to4 *ptr) {
-	int i;
-
-	for (i = 0; i < 256; i++) {
-		if (ptr->ptr[i] != NULL) {
-			del_6to4_recursive(ptr->ptr[i]);
-		}
-	}
-
-	if (ptr->rt != NULL) {
-		kfree(ptr->rt);
-	}
-
-	kfree(ptr);
-}
-
-int del_6to4_entry(struct in6_addr *entry) {
-	struct rtree_6to4 *ptr, *last_ptr;
-	int i, side, flag;
-
-	last_ptr = ptr = &tree64;
-	side = entry->s6_addr[0];
+// Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
+int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __be16 *oldp)
+{
+	struct map_tuple *iter;
+	int ret = -1;
 	
-	for (i = 0; i < IVI_PREFIXLEN; i++) {
-		flag = 0;
-		if (ptr->rt != NULL) {
-			flag = 1;
-		}
-		if (flag == 0) {
-			for (i = 0; i < 255; i++) {
-				if (i != entry->s6_addr[i]) {
-					if (ptr->ptr[i] != NULL) {
-						last_ptr = ptr;
-						side = 0;
-						break;
-					}
-				}
-			}
-		}
-		else {
-			last_ptr = ptr;
-			side = 0;
-		}
-		if (ptr->ptr[entry->s6_addr[i]] != NULL) {
-			ptr = ptr->ptr[entry->s6_addr[i]];
-		}
-		else {
-			printk(KERN_WARNING "cannot find entry for specified prefix, entry is not deleted.\n");
-			kfree(entry);
-			return -ENXIO;
-		}
-	}
-
-	if (ptr->rt == NULL) {
-		printk(KERN_WARNING "cannot find entry for specified prefix, entry is not deleted.\n");
-		kfree(entry);
-		return -ENXIO;
-	}
-
-	flag = 0;
-	for (i = 0; i < 256; i++) {
-		if (ptr->ptr[i] != NULL) {
-			flag = 1;
-			break;
-		}
-	}
-
-	if (flag == 1) { // there is longer prefix under this branch
-		kfree(ptr->rt);
-		ptr->rt = NULL;
-	}
-	else {
-		del_6to4_recursive(last_ptr->ptr[side]);
-		last_ptr->ptr[side] = NULL;
-	}
-	kfree(entry);
-	counter64--;
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "6-to-4 mapping entry successfully deleted, now we have %d entries.\n", counter46);
-#endif
-	return 0;
-}
-EXPORT_SYMBOL(del_6to4_entry);
-
-int count_6to4(void) {
-	return counter64;
-}
-EXPORT_SYMBOL(count_6to4);
-
-int list_6to4(struct in6_addr *rt, const int maxcount) {
-	struct rtree_6to4 *stack[16]; //maximum stack depth for IPv4 prefix is 16-byte
-	int iterate[16];
-	int i = 0, ptr = 0;
+	refresh_map_list(list);
 	
-	memset (stack, 0, sizeof(struct rtree_6to4 *) * 16);
-	stack[0] = &tree64;
-	iterate[0] = 0;
-	while (ptr >= 0) {
-		if (iterate[ptr] < 256) {
-			iterate[ptr]++;
-			if (stack[ptr]->ptr[iterate[ptr] - 1] != NULL) {
-				stack[ptr + 1] = stack[ptr]->ptr[iterate[ptr] - 1];
-				iterate[ptr + 1] = 0;
-				ptr++;
-			}
-		}
-		else {
-			if (stack[ptr]->rt != NULL) {
-				if (i >= maxcount) {
-					printk(KERN_WARNING "actual mapping entry number is larger than counter.\n");
-					return -ENOMEM;
-				}
-				memcpy(rt + i, stack[ptr]->rt, sizeof(struct in6_addr));
-				i++;
-			}
-			ptr--;
-			break;
-		}
-	}
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "successfully returned %d 6-to-4 mapping entries.\n", i);
-#endif
-	return i;
-}
-EXPORT_SYMBOL(list_6to4);
-
-int umap_4to6(unsigned int *v4addr, struct in6_addr *v6addr) {
-	struct rtree_4to6 *ptr;
-	struct rt_4to6_entry *entry;
-	unsigned int mask = 0x80000000;
-	unsigned int addr = htonl(*v4addr);
-	unsigned int hash = (addr >> 16) + (addr & 0xffff);
-	int i;
-
-	if (rcache[hash].v4addr == addr) {
-		entry = rcache[hash].rt;
-	}
-	else {
-		ptr = &tree46;
-		entry = tree46.rt;
-		for (i = 0; i < 32; i++) {
-			if ((addr & mask) == 0) {
-				if (ptr->lptr != NULL) {
-					ptr = ptr->lptr;
-				}
-				else {
-					break;
-				}
-			}
-			else {
-				if (ptr->rptr != NULL) {
-					ptr = ptr->rptr;
-				}
-				else {
-					break;
-				}
-			}
-			if (ptr->rt != NULL) {
-				entry = ptr->rt;
-			}
-			mask >>= 1;
-		}
-		rcache[hash].v4addr = addr;
-		rcache[hash].rt = entry;
+	*oldp = 0;
+	*oldaddr = 0;
+	
+	spin_lock_bh(&list->lock);
+	
+	if (list_empty(&list->chain)) {
+		spin_unlock_bh(&list->lock);
+		printk("get_inflow_map_port: map list empty.\n");
+		return -1;
 	}
 
-	if (entry == NULL) {
-#ifdef IVI_DEBUG
-		printk(KERN_DEBUG "no valid 4-to-6 mapping entry found for %hd.%hd.%hd.%hd.\n",
-				(unsigned char)(addr >> 24), (unsigned char)((addr >> 16) & 0xff),
-				(unsigned char)((addr >> 8) & 0xff), (unsigned char)(addr & 0xff));
-#endif
-		return -ENXIO;
-	}
-
-	memset(v6addr, 0, sizeof(struct in6_addr));
-	memcpy(v6addr->s6_addr, entry->v6prefix, IVI_PREFIXLEN);
-	v6addr->s6_addr[IVI_PREFIXLEN] = (unsigned char)(addr >> 24);
-	v6addr->s6_addr[IVI_PREFIXLEN + 1] = (unsigned char)((addr >> 16) & 0xff);
-	v6addr->s6_addr[IVI_PREFIXLEN + 2] = (unsigned char)((addr >> 8) & 0xff);
-	v6addr->s6_addr[IVI_PREFIXLEN + 3] = (unsigned char)(addr & 0xff);
-	return 0;
-}
-EXPORT_SYMBOL(umap_4to6);
-
-int umap_6to4(struct in6_addr *v6addr, unsigned int *v4addr) {
-	struct rtree_6to4 *ptr = &tree64;
-	unsigned int addr = 0;
-	int i;
-
-	for (i = 0; i < IVI_PREFIXLEN; i++) {
-		if (ptr->ptr[v6addr->s6_addr[i]] != NULL) {
-			ptr = ptr->ptr[v6addr->s6_addr[i]];
-		}
-		else {
+	list_for_each_entry(iter, &list->chain, node) {
+		if (iter->newport == newp) {
+			*oldaddr = iter->oldaddr;
+			*oldp = iter->oldport;
+			do_gettimeofday(&iter->timer);
+			printk("get_inflow_map_port: find map %x:%d -> %d.\n", *oldaddr, *oldp, newp);
+			ret = 0;
 			break;
 		}
 	}
 	
-	if ((i < IVI_PREFIXLEN) || (ptr->rt == NULL)) {
-#ifdef IVI_DEBUG
-		printk(KERN_DEBUG "no valid 6-to-4 mapping entry found for %hx:%hx:%hx:%hx:%hx:%hx:%hx:%hx.\n",
-				ntohs(v6addr->s6_addr16[0]), ntohs(v6addr->s6_addr16[1]), ntohs(v6addr->s6_addr16[2]),
-				ntohs(v6addr->s6_addr16[3]), ntohs(v6addr->s6_addr16[4]), ntohs(v6addr->s6_addr16[5]),
-				ntohs(v6addr->s6_addr16[6]), ntohs(v6addr->s6_addr16[7]));
-#endif
-		return -ENXIO;
-	}
-
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN]) << 24;
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN + 1]) << 16;
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN + 2]) << 8;
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN + 3]);
-	*v4addr = ntohl(addr);
-	return 0;
+	spin_unlock_bh(&list->lock);
+	
+	return ret;
 }
-EXPORT_SYMBOL(umap_6to4);
+EXPORT_SYMBOL(get_inflow_map_port);
 
 static int __init ivi_map_init(void) {
-	int i;
-	
-	counter46 = counter64 = 0;
-	tree46.rt = NULL;
-	tree46.lptr = tree46.rptr = NULL;
-	tree64.rt = NULL;
-	for (i = 0; i < 256; i++) {
-		tree64.ptr[i] = NULL;
-	}
-	for (i = 0; i < 131072; i++) {
-		rcache[i].v4addr = 0;
-	}
-
+	init_map_list(&tcp_list, 60);
+	init_map_list(&udp_list, 60);
+	init_map_list(&icmp_list, 30);
 #ifdef IVI_DEBUG
 	printk(KERN_DEBUG "IVI: module ivi_map loaded.\n");
 #endif 
@@ -496,21 +249,9 @@ static int __init ivi_map_init(void) {
 module_init(ivi_map_init);
 
 static void __exit ivi_map_exit(void) {
-	int i;
-	
-	if (tree46.lptr != NULL) {
-		del_4to6_recursive(tree46.lptr);
-	}
-	if (tree46.rptr != NULL) {
-		del_4to6_recursive(tree46.rptr);
-	}
-	for (i = 0; i < 256; i++) {
-		if (tree64.ptr[i] != NULL) {
-			del_6to4_recursive(tree64.ptr[i]);
-		}
-	}
-	counter46 = counter64 = 0;
-
+	free_map_list(&tcp_list);
+	free_map_list(&udp_list);
+	free_map_list(&icmp_list);
 #ifdef IVI_DEBUG
 	printk(KERN_DEBUG "IVI: module ivi_map unloaded.\n");
 #endif
@@ -518,5 +259,5 @@ static void __exit ivi_map_exit(void) {
 module_exit(ivi_map_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("ZHU Yuncheng <haoyu@cernet.edu.cn>");
-MODULE_DESCRIPTION("IVI Address Mapping Kernel Module");
+MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
+MODULE_DESCRIPTION("IVI NAT44 Address Port Mapping Kernel Module");
