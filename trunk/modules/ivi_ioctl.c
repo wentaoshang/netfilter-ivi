@@ -7,6 +7,7 @@
  * Changes:
  *	Wentao Shang	:	Remove ivi mac io control code.
  *	Wentao Shang	:	Remove old ivi_map functions.
+ *	Wentao Shang	:	Add new control codes for ivi and nat filter address configuration.
  */
 
 #ifdef MODVERSIONS
@@ -20,12 +21,13 @@
 #include "ivi_nf.h"
 #include "ivi_xmit.h"
 #include "ivi_ioctl.h"
+#include "ivi_config.h"
 
 static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) {
 	int retval = 0;
 	struct net_device *dev;
 	char temp[IVI_IOCTL_LEN];
-
+	
 	switch (cmd) {
 		case IVI_IOC_V4DEV:
 			if (copy_from_user(temp, (char *)arg, IVI_IOCTL_LEN) > 0) {
@@ -37,6 +39,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				return -ENODEV;
 			}
 			retval = nf_getv4dev(dev);
+			printk(KERN_INFO "ivi_ioctl: v4 device set to %s.\n", temp);
 			break;
 		
 		case IVI_IOC_V6DEV:
@@ -49,15 +52,66 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				return -ENODEV;
 			}
 			retval = nf_getv6dev(dev);
+			printk(KERN_INFO "ivi_ioctl: v6 device set to %s.\n", temp);
 			break;
 		
 		case IVI_IOC_START:
 			retval = nf_running(1);
 			break;
+		
 		case IVI_IOC_STOP:
 			retval = nf_running(0);
 			break;
-
+		
+		case IVI_IOC_V4NET:
+			if (copy_from_user(&v4network, (__be32 *)arg, sizeof(__be32)) > 0) {
+				return -EACCES;
+			}
+			v4network = ntohl(v4network);
+			printk(KERN_INFO "ivi_ioctl: v4 network set to %08x.\n", v4network);
+			break;
+		
+		case IVI_IOC_V4MASK:
+			if (copy_from_user(&v4mask, (__be32 *)arg, sizeof(__be32)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: v4 network mask set to %08x.\n", v4mask);
+			break;
+		
+		case IVI_IOC_V6NET:
+			if (copy_from_user(v6prefix, (__u8 *)arg, 16) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: v6 prefix set to %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x.\n", 
+				ntohs(((__be16 *)v6prefix)[0]), ntohs(((__be16 *)v6prefix)[1]), ntohs(((__be16 *)v6prefix)[2]), ntohs(((__be16 *)v6prefix)[3]), 
+				ntohs(((__be16 *)v6prefix)[4]), ntohs(((__be16 *)v6prefix)[5]), ntohs(((__be16 *)v6prefix)[6]), ntohs(((__be16 *)v6prefix)[7]));
+			break;
+		
+		case IVI_IOC_V6MASK:
+			if (copy_from_user(&v6prefixlen, (__be32 *)arg, sizeof(__be32)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: v6 prefix length set to %d.\n", v6prefixlen);
+			break;
+		
+		case IVI_IOC_V4PUB:
+			if (copy_from_user(&v4publicaddr, (__be32 *)arg, sizeof(__be32)) > 0) {
+				return -EACCES;
+			}
+			v4publicaddr = ntohl(v4publicaddr);
+			printk(KERN_INFO "ivi_ioctl: v4 public address set to %08x.\n", v4publicaddr);
+			break;
+		
+		case IVI_IOC_NAT:
+			use_nat44 = 1;
+			printk(KERN_INFO "ivi_ioctl: nat44 enabled.\n");
+			break;
+		
+		case IVI_IOC_NONAT:
+			use_nat44 = 0;
+			printk(KERN_INFO "ivi_ioctl: nat44 disabled.\n");
+			break;
+		
 		default:
 			retval = -ENOTTY;
 	}

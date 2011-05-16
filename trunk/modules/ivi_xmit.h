@@ -23,6 +23,13 @@
 #include "ivi_config.h"
 #include "ivi_map.h"
 
+extern __be32 v4network;
+extern __be32 v4mask;
+extern __u8 use_nat44;
+extern __be32 v4publicaddr;
+extern __u8 v6prefix[16];
+extern __be32 v6prefixlen;
+
 extern int ivi_v4v6_xmit(struct sk_buff *skb);
 extern int ivi_v6v4_xmit(struct sk_buff *skb);
 extern int ivi_v4_dev(struct net_device *dev);
