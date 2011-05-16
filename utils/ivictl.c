@@ -9,7 +9,7 @@ int main(int argc, char *argv[]) {
 	char v4dev[IVI_IOCTL_LEN], v6dev[IVI_IOCTL_LEN];
 	int retval, fd, flag;
 
-	printf("IVI mapping controller utility v0.1\n");
+	printf("IVI netfilter device controller utility v1.2\n");
 	
 	if ((fd = open("/dev/ivi", 0)) < 0) {
 		printf("Error: cannot open virtual device for ioctl, code %d.\n", fd);

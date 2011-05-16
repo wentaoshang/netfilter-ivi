@@ -7,19 +7,8 @@
  * Changes:
  *	Wentao Shang	:	Upgrade to 2.6.35 kernel and remove multicast translation functionality.
  */
-#ifdef MODVERSIONS
-#include <linux/modversions.h>
-#endif
-#include <linux/module.h>
-#include <linux/netfilter.h>
-#include <linux/netfilter_ipv4.h>
-#include <linux/netfilter_ipv6.h>
-#include <net/ip.h>
-#include <net/ipv6.h>
-#include <net/route.h>
+
 #include "ivi_nf.h"
-#include "ivi_map.h"
-#include "ivi_xmit.h"
 
 //
 // Walk around the bug in netfilter.ipv4.h and netfilter_ipv6.h.
@@ -84,24 +73,6 @@ struct nf_hook_ops v6_ops = {
 
 int nf_running(const int run) {
 	running = run;
-	/*
-	if (run != 0) {
-		if (v4_dev != NULL) {
-			dev_set_promiscuity(v4_dev, 1);
-		}
-		if (v6_dev != NULL) {
-			dev_set_promiscuity(v6_dev, 1);
-		}
-	}
-	else {
-		if (v4_dev != NULL) {
-			dev_set_promiscuity(v4_dev, -1);
-		}
-		if (v6_dev != NULL) {
-			dev_set_promiscuity(v6_dev, -1);
-		}
-	}
-	 */
 #ifdef IVI_DEBUG
 	printk(KERN_ERR "set running state to %d.\n", running);
 #endif
@@ -154,5 +125,6 @@ module_exit(ivi_nf_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("ZHU Yuncheng <haoyu@cernet.edu.cn>");
+MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
 MODULE_DESCRIPTION("IVI Netfilter Address Kernel Module");
 
