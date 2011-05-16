@@ -9,6 +9,7 @@
  *	Wentao Shang	:	Simplified prefix matching and address translation, v4network and v6prefix are now hard coded.
  *	Wentao Shang	:	Add NAT44-PT support.
  *	Wentao Shang	:	Add ICMP translation support.
+ *	Wentao Shang	:	IPv6 prefix length is configurable now.
  */
 
 #include "ivi_xmit.h"
@@ -24,15 +25,25 @@ static __inline int mc_v6_addr(const struct in6_addr *addr) {
 }
 
 // private v4 network where v4dev is located.
-static __be32 v4network = 0x01010100;  // "1.1.1.0" in host byte order
-static __be32 v4mask    = 0xffffff00;  // "/24"
+__be32 v4network = 0x01010100;  // "1.1.1.0" in host byte order
+EXPORT_SYMBOL(v4network);
+
+__be32 v4mask = 0xffffff00;  // "/24"
+EXPORT_SYMBOL(v4mask);
 
 // NAT public address for v4 network
-static __u8 use_nat44 = 0;
-static __be32 v4publicaddr = 0x03030303;  // "3.3.3.3" in host byte order
+__u8 use_nat44 = 0;
+EXPORT_SYMBOL(use_nat44);
+
+__be32 v4publicaddr = 0x03030303;  // "3.3.3.3" in host byte order
+EXPORT_SYMBOL(v4publicaddr);
 
 // v6 prefix where v4 network or public address is mapped into.
-static __u8 v6prefix[IVI_PREFIXLEN] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::/64" in network byte order
+__u8 v6prefix[16] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::" in network byte order
+EXPORT_SYMBOL(v6prefix);
+
+__be32 v6prefixlen = 8;  // "/64" prefix length in bytes (8)
+EXPORT_SYMBOL(v6prefixlen);
 
 static __inline int addr_in_v4network(const unsigned int *addr) {
 	return ((ntohl(*addr) & v4mask) == v4network);
@@ -42,7 +53,7 @@ int addr_in_v6network(const struct in6_addr *addr) {
 	__be32 embed = 0;
 	int i, ret = 1;
 	
-	for (i = 0; i < IVI_PREFIXLEN; i++) {
+	for (i = 0; i < v6prefixlen; i++) {
 		if (addr->s6_addr[i] != v6prefix[i]) {
 			ret = 0;
 			break;
@@ -53,10 +64,10 @@ int addr_in_v6network(const struct in6_addr *addr) {
 		return ret;
 	}
 	
-	embed |= ((unsigned int)addr->s6_addr[IVI_PREFIXLEN]) << 24;
-	embed |= ((unsigned int)addr->s6_addr[IVI_PREFIXLEN + 1]) << 16;
-	embed |= ((unsigned int)addr->s6_addr[IVI_PREFIXLEN + 2]) << 8;
-	embed |= ((unsigned int)addr->s6_addr[IVI_PREFIXLEN + 3]);
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen]) << 24;
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 1]) << 16;
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 2]) << 8;
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 3]);
 	
 	if (use_nat44 == 0)
 		return ((embed & v4mask) == v4network);
@@ -68,11 +79,11 @@ int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr) {
 	unsigned int addr = ntohl(*v4addr);
 	
 	memset(v6addr, 0, sizeof(struct in6_addr));
-	memcpy(v6addr->s6_addr, v6prefix, IVI_PREFIXLEN);
-	v6addr->s6_addr[IVI_PREFIXLEN] = (unsigned char)(addr >> 24);
-	v6addr->s6_addr[IVI_PREFIXLEN + 1] = (unsigned char)((addr >> 16) & 0xff);
-	v6addr->s6_addr[IVI_PREFIXLEN + 2] = (unsigned char)((addr >> 8) & 0xff);
-	v6addr->s6_addr[IVI_PREFIXLEN + 3] = (unsigned char)(addr & 0xff);
+	memcpy(v6addr->s6_addr, v6prefix, v6prefixlen);
+	v6addr->s6_addr[v6prefixlen] = (unsigned char)(addr >> 24);
+	v6addr->s6_addr[v6prefixlen + 1] = (unsigned char)((addr >> 16) & 0xff);
+	v6addr->s6_addr[v6prefixlen + 2] = (unsigned char)((addr >> 8) & 0xff);
+	v6addr->s6_addr[v6prefixlen + 3] = (unsigned char)(addr & 0xff);
 	
 	return 0;  // This function always succeed.
 }
@@ -80,10 +91,10 @@ int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr) {
 int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr) {
 	__be32 addr = 0;
 	
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN]) << 24;
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN + 1]) << 16;
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN + 2]) << 8;
-	addr |= ((unsigned int)v6addr->s6_addr[IVI_PREFIXLEN + 3]);
+	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen]) << 24;
+	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen + 1]) << 16;
+	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen + 2]) << 8;
+	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen + 3]);
 	*v4addr = htonl(addr);
 	
 	return 0;  // This function always succeed.
