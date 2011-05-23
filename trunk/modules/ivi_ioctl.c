@@ -27,6 +27,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 	int retval = 0;
 	struct net_device *dev;
 	char temp[IVI_IOCTL_LEN];
+	__be16 tmp;
 	
 	switch (cmd) {
 		case IVI_IOC_V4DEV:
@@ -112,6 +113,45 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			printk(KERN_INFO "ivi_ioctl: nat44 disabled.\n");
 			break;
 		
+		case IVI_IOC_POSTFIX:
+			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: ratio set to %04x.\n", ratio);
+			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: offset set to %04x.\n", offset);
+			addr_fmt = ADDR_FMT_POSTFIX;
+			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
+			break;
+
+		case IVI_IOC_SUFFIX:
+			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: ratio set to %04x.\n", ratio);
+			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: offset set to %04x.\n", offset);
+			
+			suffix = 0;
+			tmp = ratio;
+			while (tmp >> 1 != 0) {
+				suffix++;
+				tmp = tmp >> 1;
+			}
+			printk("%04x\n", suffix);
+			suffix = suffix << 12;
+			printk("%04x\n", suffix);
+			suffix += offset & 0x0fff;
+			printk("%04x\n", suffix);
+			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", suffix);
+			addr_fmt = ADDR_FMT_SUFFIX;
+			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
+			break;
+
 		default:
 			retval = -ENOTTY;
 	}
