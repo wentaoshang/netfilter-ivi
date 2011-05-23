@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
 	struct in_addr v4addr;
 	int mask;
 	struct in6_addr v6addr;
-
+	
 	printf("IVI netfilter device controller utility v1.3\n");
 	
 	if ((fd = open("/dev/ivi", 0)) < 0) {
@@ -152,9 +152,33 @@ int main(int argc, char *argv[]) {
 			printf("Info: successfully stopped IVI module.\n");
 		}
 	}
+	else if ((argc == 5) && (strcmp(argv[1], "format") == 0)) {
+		unsigned short postfix[2];
+		postfix[0] = atoi(argv[3]);
+		postfix[1] = atoi(argv[4]);
+		if (strcmp(argv[2], "postfix") == 0) {
+			if ((retval = ioctl(fd, IVI_IOC_POSTFIX, postfix)) < 0) {
+				printf("Error: failed to set addr format, code %d.\n", retval);
+				exit(-1);
+			}
+		}
+		else if (strcmp(argv[2], "suffix") == 0) {
+			if ((retval = ioctl(fd, IVI_IOC_SUFFIX, postfix)) < 0) {
+				printf("Error: failed to set addr format, code %d.\n", retval);
+				exit(-1);
+			}
+		}
+		else {
+			printf("Error: unknown address format name %s.\n", argv[2]);
+			exit(-1);
+		}
+		printf("Info: successfully set address format.\n");
+	}
 	else {
 		printf("Usage: ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len]\n");
 		printf("       ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v4_public_addr] [v6_prefix] [v6_prefix_len]\n");
+		printf("       ivictl format postfix [ratio] [offset]\n");
+		printf("       ivictl format suffix [ratio] [offset]\n");
 		printf("       ivictl stop\n");
 	}
 

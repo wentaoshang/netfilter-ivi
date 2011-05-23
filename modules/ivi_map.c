@@ -27,6 +27,9 @@ EXPORT_SYMBOL(ratio);
 __be16 offset = 0;
 EXPORT_SYMBOL(offset);
 
+__be16 suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
+EXPORT_SYMBOL(suffix);
+
 /* list operations */
 
 // Get current size of the list, must be protected by spin lock when calling this function

@@ -41,6 +41,7 @@ struct map_list {
 /* global map list variables */
 extern __be16 ratio;
 extern __be16 offset;
+extern __be16 suffix;
 
 extern struct map_list tcp_list;
 extern struct map_list udp_list;

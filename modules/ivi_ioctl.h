@@ -20,6 +20,9 @@
 #define IVI_IOC_NAT	_IO(IVI_IOCTL, 0x19)
 #define IVI_IOC_NONAT	_IO(IVI_IOCTL, 0x1a)
 
+#define IVI_IOC_POSTFIX	_IOW(IVI_IOCTL, 0x1b, int)
+#define IVI_IOC_SUFFIX	_IOW(IVI_IOCTL, 0x1c, int)
+
 #define IVI_IOCTL_LEN	32
 
 #endif /* IVI_IOCTL_H */

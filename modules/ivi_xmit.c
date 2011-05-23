@@ -45,6 +45,9 @@ EXPORT_SYMBOL(v6prefix);
 __be32 v6prefixlen = 8;  // "/64" prefix length in bytes (8)
 EXPORT_SYMBOL(v6prefixlen);
 
+__u8 addr_fmt = 0;  // ivi translated address format
+EXPORT_SYMBOL(addr_fmt);
+
 static __inline int addr_in_v4network(const unsigned int *addr) {
 	return ((ntohl(*addr) & v4mask) == v4network);
 }
@@ -84,6 +87,14 @@ int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr) {
 	v6addr->s6_addr[v6prefixlen + 1] = (unsigned char)((addr >> 16) & 0xff);
 	v6addr->s6_addr[v6prefixlen + 2] = (unsigned char)((addr >> 8) & 0xff);
 	v6addr->s6_addr[v6prefixlen + 3] = (unsigned char)(addr & 0xff);
+	
+	if (addr_fmt == ADDR_FMT_POSTFIX) {
+		v6addr->s6_addr16[6] = htons(ratio);
+		v6addr->s6_addr16[7] = htons(offset);
+	} else if (addr_fmt == ADDR_FMT_SUFFIX) {
+		v6addr->s6_addr[v6prefixlen + 4] = (suffix >> 8) & 0xff;
+		v6addr->s6_addr[v6prefixlen + 5] = suffix & 0xff;
+	}
 	
 	return 0;  // This function always succeed.
 }
@@ -139,6 +150,15 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		return 0;
 	}
 	
+	if (ip4h->ttl <= 1) {
+		// By pass the packet if its TTL reaches 1, the kernel routing system will
+		// drop the packet and send ICMPv4 error message to the source of the packet.
+		// Translating it will cause kernel to send ICMPv6 error message on v4dev
+		// interface, which will never be received.
+		printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 packet with TTL = 1.\n");
+		return -EINVAL;  // Just accept.
+	}
+
 	if (use_nat44 == 1) {
 		__be16 newp;
 		
@@ -309,6 +329,15 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	if (addr_in_v6network(&(ip6h->daddr)) == 0) {
 		// Do not translate packets that are not heading toward the v4 network.
 		printk(KERN_ERR "ivi_v6v4_xmit: by pass packet that are not to the v4 network, routing system will handle them.\n");
+		return -EINVAL;  // Just accept.
+	}
+	
+	if (ip6h->hop_limit <= 1) {
+		// By pass the packet if its hop limit reaches 1, the kernel routing system will
+		// drop the packet and send ICMPv6 error message to the source of the packet.
+		// Translating it will cause kernel to send ICMPv4 error message on v6dev 
+		// interface, which will never be received.
+		printk(KERN_ERR "ivi_v6v4_xmit: by pass ipv6 packet with hop limit = 1.\n");
 		return -EINVAL;  // Just accept.
 	}
 	
