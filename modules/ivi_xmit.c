@@ -78,7 +78,7 @@ int addr_in_v6network(const struct in6_addr *addr) {
 		return (embed == v4publicaddr);
 }
 
-int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr) {
+int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, __u8 fmt) {
 	unsigned int addr = ntohl(*v4addr);
 	
 	memset(v6addr, 0, sizeof(struct in6_addr));
@@ -88,10 +88,10 @@ int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr) {
 	v6addr->s6_addr[v6prefixlen + 2] = (unsigned char)((addr >> 8) & 0xff);
 	v6addr->s6_addr[v6prefixlen + 3] = (unsigned char)(addr & 0xff);
 	
-	if (addr_fmt == ADDR_FMT_POSTFIX) {
+	if (fmt == ADDR_FMT_POSTFIX) {
 		v6addr->s6_addr16[6] = htons(ratio);
 		v6addr->s6_addr16[7] = htons(offset);
-	} else if (addr_fmt == ADDR_FMT_SUFFIX) {
+	} else if (fmt == ADDR_FMT_SUFFIX) {
 		v6addr->s6_addr[v6prefixlen + 4] = (suffix >> 8) & 0xff;
 		v6addr->s6_addr[v6prefixlen + 5] = suffix & 0xff;
 	}
@@ -134,13 +134,13 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	ip4h = ip_hdr(skb);
 	if (mc_v4_addr(&(ip4h->daddr))) {
 		// By pass multicast packet
-		printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 multicast packet.\n");
+		//printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 multicast packet.\n");
 		return -EINVAL;
 	}
 	
 	if (addr_in_v4network(&(ip4h->daddr))) {
 		// Do not translate ipv4 packets (hair pin) that are toward v4network.
-		printk(KERN_ERR "ivi_v4v6_xmit: IPv4 packet from the v4 network bypassed.\n");
+		//printk(KERN_ERR "ivi_v4v6_xmit: IPv4 packet toward the v4 network bypassed.\n");
 		return -EINVAL;  // Just accept.
 	}
 	
@@ -159,7 +159,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		return -EINVAL;  // Just accept.
 	}
 
-	if (use_nat44 == 1) {
+	if (use_nat44 == 1 || addr_fmt != ADDR_FMT_NONE) {
 		__be16 newp;
 		
 		payload = (__u8 *)(ip4h) + (ip4h->ihl << 2);
@@ -171,8 +171,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (TCP).\n", ntohl(ip4h->saddr), ntohs(tcph->source));
 					// Just let the packet pass with original address.
 				} else {
-					// SNAT-PT
-					ip4h->saddr = htonl(v4publicaddr);
+					if (use_nat44 == 1) {
+						// SNAT-PT
+						ip4h->saddr = htonl(v4publicaddr);
+					}
 					tcph->source = htons(newp);
 				}
 				
@@ -185,8 +187,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (UDP).\n", ntohl(ip4h->saddr), ntohs(udph->source));
 					// Just let the packet pass with original address.
 				} else {
-					// SNAT-PT
-					ip4h->saddr = htonl(v4publicaddr);
+					if (use_nat44 == 1) {
+						// SNAT-PT
+						ip4h->saddr = htonl(v4publicaddr);
+					}
 					udph->source = htons(newp);
 				}
 				
@@ -200,8 +204,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (ICMP).\n", ntohl(ip4h->saddr), ntohs(icmph->un.echo.id));
 						// Just let the packet pass with original address.
 					} else {
-						// SNAT-PT
-						ip4h->saddr = htonl(v4publicaddr);
+						if (use_nat44 == 1) {
+							// SNAT-PT
+							ip4h->saddr = htonl(v4publicaddr);
+						}
 						icmph->un.echo.id = htons(newp);
 					}
 				} else {
@@ -231,12 +237,12 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	eth6->h_proto  = __constant_ntohs(ETH_P_IPV6);
 	
 	ip6h = (struct ipv6hdr *)skb_put(newskb, hlen);
-	if (ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr)) != 0) {
+	if (ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), addr_fmt) != 0) {
 		kfree_skb(newskb);
 		return 0;
 	}
 	
-	if (ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr)) != 0) {
+	if (ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), ADDR_FMT_NONE) != 0) {
 		kfree_skb(newskb);
 		return 0;
 	}
@@ -316,7 +322,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	ip6h = ipv6_hdr(skb);
 	if (mc_v6_addr(&(ip6h->daddr))) {
 		// By pass ipv6 multicast packet (for ND)
-		printk(KERN_ERR "ivi_v6v4_xmit: by pass ipv6 multicast packet, possibly ND packet.\n");
+		//printk(KERN_ERR "ivi_v6v4_xmit: by pass ipv6 multicast packet, possibly ND packet.\n");
 		return -EINVAL;
 	}
 	
@@ -328,7 +334,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	
 	if (addr_in_v6network(&(ip6h->daddr)) == 0) {
 		// Do not translate packets that are not heading toward the v4 network.
-		printk(KERN_ERR "ivi_v6v4_xmit: by pass packet that are not to the v4 network, routing system will handle them.\n");
+		//printk(KERN_ERR "ivi_v6v4_xmit: by pass packet that are not to the v4 network, routing system will handle them.\n");
 		return -EINVAL;  // Just accept.
 	}
 	
@@ -377,7 +383,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 			skb_copy_bits(skb, 40, payload, plen);
 			tcph = (struct tcphdr *)payload;
 			
-			if (use_nat44 == 1) {
+			if (use_nat44 == 1 || addr_fmt != ADDR_FMT_NONE) {
 				__be32 oldaddr;
 				__be16 oldp;
 				
@@ -398,7 +404,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 			skb_copy_bits(skb, 40, payload, plen);
 			udph = (struct udphdr *)payload;
 			
-			if (use_nat44 == 1) {
+			if (use_nat44 == 1 || addr_fmt != ADDR_FMT_NONE) {
 				__be32 oldaddr;
 				__be16 oldp;
 				
@@ -423,7 +429,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				icmph->type = (icmph->type == ICMPV6_ECHO_REQUEST) ? ICMP_ECHO : ICMP_ECHOREPLY;
 				ip4h->protocol = IPPROTO_ICMP;
 				
-				if (use_nat44 == 1) {
+				if (use_nat44 == 1 || addr_fmt != ADDR_FMT_NONE) {
 					__be32 oldaddr;
 					__be16 oldp;
 					

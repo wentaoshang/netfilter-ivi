@@ -6,4 +6,4 @@ all:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
 
 clean:
-	rm -rf *.ko *.o *.mod.c core Module.symvers modules.order
+	rm -rf *.ko *.o *.mod.c core Module.symvers Module.markers modules.order

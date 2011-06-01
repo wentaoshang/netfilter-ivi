@@ -34,7 +34,7 @@ struct map_list {
 	struct list_head chain;
 	int size;
 	time_t timeout;
-	__be16 last_alloc;
+	__be16 last_alloc;  // This field is meaningless for 1:1 mapping since we will use the old port directly without allocating a new one.
 	__u8 used[65536];
 };
 
