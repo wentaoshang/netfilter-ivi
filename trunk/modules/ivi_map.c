@@ -162,32 +162,40 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 	}
 	
 	if (retport == 0) {
-		int remaining;
-		__be16 rover, low, high;
-		
-		low = (__u16)(1023 / ratio) + 1;
-		high = (__u16)(65536 / ratio) - 1;
-		remaining = (high - low) + 1;
+		__be16 rover;
 
-		if (list->last_alloc != 0)
-			rover = list->last_alloc + 1;
-		else
-			rover = low;
-		
-		do { 
-			retport = rover * ratio + offset;
-			if (!port_in_use(retport, list))
-				break;
+		if (ratio == 1) {
+			// We are in 1:1 mapping mode, use old port directly.
+			retport = oldp;
+			rover = retport; // rover is meaningless in 1:1 mapping mode.
+		} else {
+			int remaining;
+			__be16 low, high;
 			
-			if (++rover > high)
+			low = (__u16)(1023 / ratio) + 1;
+			high = (__u16)(65536 / ratio) - 1;
+			remaining = (high - low) + 1;
+			
+			if (list->last_alloc != 0)
+				rover = list->last_alloc + 1;
+			else
 				rover = low;
 			
-		} while (--remaining > 0);
-		
-		if (remaining <= 0) {
-			spin_unlock_bh(&list->lock);
-			printk("get_outflow_map_port: failed to assign a new map port for port: %d.\n", oldp);
-			return -1;
+			do { 
+				retport = rover * ratio + offset;
+				if (!port_in_use(retport, list))
+					break;
+				
+				if (++rover > high)
+					rover = low;
+				
+			} while (--remaining > 0);
+			
+			if (remaining <= 0) {
+				spin_unlock_bh(&list->lock);
+				printk("get_outflow_map_port: failed to assign a new map port for port: %d.\n", oldp);
+				return -1;
+			}
 		}
 		
 		if (add_new_map(oldaddr, oldp, retport, rover, list) == NULL) {
@@ -241,7 +249,7 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __b
 EXPORT_SYMBOL(get_inflow_map_port);
 
 static int __init ivi_map_init(void) {
-	init_map_list(&tcp_list, 60);
+	init_map_list(&tcp_list, 1200);
 	init_map_list(&udp_list, 60);
 	init_map_list(&icmp_list, 30);
 #ifdef IVI_DEBUG
