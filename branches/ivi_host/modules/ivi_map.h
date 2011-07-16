@@ -22,7 +22,6 @@
 /* map entry structure */
 struct map_tuple {
 	struct list_head node;
-	__be32 oldaddr;
 	__be16 oldport;
 	__be16 newport;
 	struct timeval timer;
@@ -53,8 +52,8 @@ extern void refresh_map_list(struct map_list *list);
 extern void free_map_list(struct map_list *list);
 
 /* mapping operations */
-extern int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp);
-extern int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __be16 *oldp);
+extern int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp);
+extern int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp);
 
 #endif
 

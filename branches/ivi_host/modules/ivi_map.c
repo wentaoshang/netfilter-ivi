@@ -57,7 +57,7 @@ static __inline int port_in_use(unsigned int port, struct map_list *list)
 }
 
 // Add a new map, the pointer to the new map_tuple is returned on success, must be protected by spin lock when calling this function
-struct map_tuple* add_new_map(__be32 oldaddr, __be16 oldp, __be16 newp, __be16 last, struct map_list *list)
+struct map_tuple* add_new_map(__be16 oldp, __be16 newp, __be16 last, struct map_list *list)
 {
 	struct map_tuple *map;
 	map = (struct map_tuple*)kmalloc(sizeof(struct map_tuple), GFP_ATOMIC);
@@ -66,7 +66,6 @@ struct map_tuple* add_new_map(__be32 oldaddr, __be16 oldp, __be16 newp, __be16 l
 		return NULL;
 	}
 	
-	map->oldaddr = oldaddr;
 	map->oldport = oldp;
 	map->newport = newp;
 	do_gettimeofday(&map->timer);
@@ -76,7 +75,7 @@ struct map_tuple* add_new_map(__be32 oldaddr, __be16 oldp, __be16 newp, __be16 l
 	list->last_alloc = last;
 	list->used[newp] = 1;
 #ifdef IVI_DEBUG
-	printk("add_new_map: new map added: %x:%d -> %d.\n", oldaddr, oldp, newp );
+	printk("add_new_map: new map added: %d -> %d.\n", oldp, newp );
 #endif
 	return map;
 }
@@ -98,7 +97,7 @@ void refresh_map_list(struct map_list *list)
 			list->size--;
 			list->used[iter->newport] = 0;
 #ifdef IVI_DEBUG
-			printk("refresh_map_list: map %x:%d -> %d time out.\n", iter->oldaddr, iter->oldport, iter->newport);
+			printk("refresh_map_list: map %d -> %d time out.\n", iter->oldport, iter->newport);
 #endif
 			kfree(iter);
 		}
@@ -131,7 +130,7 @@ EXPORT_SYMBOL(free_map_list);
 /* mapping operations */
 
 // Get mapped port for outflow packet, input and output are in host byte order, return -1 if failed
-int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp)
+int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 {
 	__be16 retport;
 	
@@ -152,10 +151,10 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 	if (!list_empty(&list->chain)) {
 		struct map_tuple *iter;
 		list_for_each_entry(iter, &list->chain, node) {
-			if (iter->oldport == oldp && iter->oldaddr == oldaddr) {
+			if (iter->oldport == oldp) {
 				retport = iter->newport;
 				do_gettimeofday(&iter->timer);
-				printk("get_outflow_map_port: find map %x:%d -> %d.\n", oldaddr, oldp, retport);
+				printk("get_outflow_map_port: find map %d -> %d.\n", oldp, retport);
 				break;
 			}
 		}
@@ -198,7 +197,7 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 			}
 		}
 		
-		if (add_new_map(oldaddr, oldp, retport, rover, list) == NULL) {
+		if (add_new_map(oldp, retport, rover, list) == NULL) {
 			spin_unlock_bh(&list->lock);
 			return -1;
 		}
@@ -213,7 +212,7 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
-int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __be16 *oldp)
+int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 {
 	struct map_tuple *iter;
 	int ret = -1;
@@ -221,7 +220,6 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __b
 	refresh_map_list(list);
 	
 	*oldp = 0;
-	*oldaddr = 0;
 	
 	spin_lock_bh(&list->lock);
 	
@@ -233,10 +231,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __b
 
 	list_for_each_entry(iter, &list->chain, node) {
 		if (iter->newport == newp) {
-			*oldaddr = iter->oldaddr;
 			*oldp = iter->oldport;
 			do_gettimeofday(&iter->timer);
-			printk("get_inflow_map_port: find map %x:%d -> %d.\n", *oldaddr, *oldp, newp);
+			printk("get_inflow_map_port: find map %d -> %d.\n", *oldp, newp);
 			ret = 0;
 			break;
 		}

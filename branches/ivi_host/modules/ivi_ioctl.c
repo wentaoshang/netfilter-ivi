@@ -25,37 +25,9 @@
 
 static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) {
 	int retval = 0;
-	struct net_device *dev;
-	char temp[IVI_IOCTL_LEN];
 	__be16 tmp;
 	
 	switch (cmd) {
-		case IVI_IOC_V4DEV:
-			if (copy_from_user(temp, (char *)arg, IVI_IOCTL_LEN) > 0) {
-				return -EACCES;
-			}
-			temp[IVI_IOCTL_LEN - 1] = 0;
-			dev = dev_get_by_name(&init_net, temp);
-			if (dev == NULL) {
-				return -ENODEV;
-			}
-			retval = nf_getv4dev(dev);
-			printk(KERN_INFO "ivi_ioctl: v4 device set to %s.\n", temp);
-			break;
-		
-		case IVI_IOC_V6DEV:
-			if (copy_from_user(temp, (char *)arg, IVI_IOCTL_LEN) > 0) {
-				return -EACCES;
-			}
-			temp[IVI_IOCTL_LEN - 1] = 0;
-			dev = dev_get_by_name(&init_net, temp);
-			if (dev == NULL) {
-				return -ENODEV;
-			}
-			retval = nf_getv6dev(dev);
-			printk(KERN_INFO "ivi_ioctl: v6 device set to %s.\n", temp);
-			break;
-		
 		case IVI_IOC_START:
 			retval = nf_running(1);
 			break;
@@ -95,24 +67,6 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			printk(KERN_INFO "ivi_ioctl: v6 prefix length set to %d.\n", v6prefixlen);
 			break;
 		
-		case IVI_IOC_V4PUB:
-			if (copy_from_user(&v4publicaddr, (__be32 *)arg, sizeof(__be32)) > 0) {
-				return -EACCES;
-			}
-			v4publicaddr = ntohl(v4publicaddr);
-			printk(KERN_INFO "ivi_ioctl: v4 public address set to %08x.\n", v4publicaddr);
-			break;
-		
-		case IVI_IOC_NAT:
-			use_nat44 = 1;
-			printk(KERN_INFO "ivi_ioctl: nat44 enabled.\n");
-			break;
-		
-		case IVI_IOC_NONAT:
-			use_nat44 = 0;
-			printk(KERN_INFO "ivi_ioctl: nat44 disabled.\n");
-			break;
-		
 		case IVI_IOC_POSTFIX:
 			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
 				return -EACCES;
@@ -142,11 +96,11 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				suffix++;
 				tmp = tmp >> 1;
 			}
-			printk("%04x\n", suffix);
+			//printk("%04x\n", suffix);
 			suffix = suffix << 12;
-			printk("%04x\n", suffix);
+			//printk("%04x\n", suffix);
 			suffix += offset & 0x0fff;
-			printk("%04x\n", suffix);
+			//printk("%04x\n", suffix);
 			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", suffix);
 			addr_fmt = ADDR_FMT_SUFFIX;
 			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
