@@ -1,0 +1,64 @@
+#!/bin/sh
+
+if [ ! -f modules/ivi_map.ko ] ; then
+	echo "Error: please make modules first."
+	exit 1
+fi
+
+start() {
+	if ( lsmod | grep "ivi_map" ) ; then
+		echo "Error: modules exist, run 'control restart' instead."
+		exit 1
+	fi
+	echo "Starting IVI modules: "
+	insmod modules/ivi_map.ko
+	echo "insmod ivi_map.ko"
+	insmod modules/ivi_xmit.ko
+	echo "insmod ivi_xmit.ko"
+	insmod modules/ivi_nf.ko
+	echo "insmod ivi_nf.ko"
+	insmod modules/ivi_ioctl.ko
+	echo "insmod ivi_ioctl.ko"
+	if [ ! -e /dev/ivi ] ; then
+		mknod /dev/ivi c 324 0
+		echo "mknod /dev/ivi c 324 0"
+	fi
+	return 0
+}
+
+stop() {
+	if ( lsmod | grep "ivi_map" ) ; then
+		echo "Stopping IVI modules: "
+		rmmod ivi_ioctl
+		echo "rmmod ivi_ioctl"
+		rmmod ivi_nf
+		echo "rmmod ivi_nf"
+		rmmod ivi_xmit
+		echo "rmmod ivi_xmit"
+		rmmod ivi_map
+		echo "rmmod ivi_map"
+		rm /dev/ivi
+		echo "rm /dev/ivi"
+	else
+		echo "Error: modules do not exist."
+	fi
+	return 0
+}
+
+case "$1" in 
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart|reload)
+		stop
+		start
+		;;
+	*)
+		echo "Usage: control {start|stop|restart|reload}"
+		exit 1
+esac
+
+exit 0
