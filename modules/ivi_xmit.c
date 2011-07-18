@@ -23,27 +23,40 @@ static __inline int mc_v6_addr(const struct in6_addr *addr) {
 	return (addr->s6_addr[0] == 0xff);
 }
 
-// private v4 network where v4dev is located.
-__be32 v4network = 0x01010100;  // "1.1.1.0" in host byte order
-EXPORT_SYMBOL(v4network);
+// v4 address allocated to the host.
+__be32 v4addr = 0x01010101;  // "1.1.1.1" in host byte order
+EXPORT_SYMBOL(v4addr);
 
-__be32 v4mask = 0xffffff00;  // "/24"
+__be32 v4mask = 0xffffff00;  // "/24" prefix length for the v4 address
 EXPORT_SYMBOL(v4mask);
 
-// v6 prefix where v4 network or public address is mapped into.
+// v6 ivi prefix
 __u8 v6prefix[16] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::" in network byte order
 EXPORT_SYMBOL(v6prefix);
 
-__be32 v6prefixlen = 8;  // "/64" prefix length in bytes (8)
+__be32 v6prefixlen = 8;  // "/64" ivi prefix length in bytes (8)
 EXPORT_SYMBOL(v6prefixlen);
 
 __u8 addr_fmt = 0;  // ivi translated address format
 EXPORT_SYMBOL(addr_fmt);
 
+/*
+ * Returns whether the v4 address belongs to the same network with the host.
+ */
 static __inline int addr_in_v4network(const unsigned int *addr) {
-	return ((ntohl(*addr) & v4mask) == v4network);
+	return ((ntohl(*addr) & v4mask) == (v4addr & v4mask));
 }
 
+/*
+ * Returns whether the v4 address is the host v4 address.
+ */
+static __inline int addr_is_v4host(const unsigned int *addr) {
+	return (ntohl(*addr) == v4addr);
+}
+
+/*
+ * Returns whether the v6 address belongs to the same network which the host's v4 network is mapped into.
+ */
 int addr_in_v6network(const struct in6_addr *addr) {
 	__be32 embed = 0;
 	int i, ret = 1;
@@ -64,7 +77,33 @@ int addr_in_v6network(const struct in6_addr *addr) {
 	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 2]) << 8;
 	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 3]);
 	
-	return ((embed & v4mask) == v4network);
+	return ((embed & v4mask) == (v4addr & v4mask));
+}
+
+/*
+ * Returns whether the v6 address is the host's mapped ivi address
+ */
+int addr_is_v6host(const struct in6_addr *addr) {
+	__be32 embed = 0;
+	int i, ret = 1;
+	
+	for (i = 0; i < v6prefixlen; i++) {
+		if (addr->s6_addr[i] != v6prefix[i]) {
+			ret = 0;
+			break;
+		}
+	}
+	
+	if (ret == 0) {
+		return ret;
+	}
+	
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen]) << 24;
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 1]) << 16;
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 2]) << 8;
+	embed |= ((unsigned int)addr->s6_addr[v6prefixlen + 3]);
+	
+	return (embed == v4addr);
 }
 
 int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, __u8 fmt) {
@@ -120,28 +159,25 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		printk(KERN_DEBUG "ivi_v4v6_xmit: by pass ipv4 multicast packet.\n");
 		return -EINVAL;
 	}
+	
+	if (unlikely(addr_is_v4host(&(ip4h->saddr)) == 0)) {
+		// Do not translate packets that are not sent by the local host, return 0 to drop packet.
+		printk(KERN_DEBUG "ivi_v4v6_xmit: drop IPv4 packet that is not sent by the local host.\n");
+		return 0;
+	}
+
+	if (unlikely(addr_is_v4host(&(ip4h->daddr)))) {
+		// Do not translate ipv4 packets that are toward the host (which should not be possible.).
+		printk(KERN_ERR "ivi_v4v6_xmit: by pass IPv4 packet heading toward the host.\n");
+		return -EINVAL;  // Just accept.
+	}
 /*
 	if (addr_in_v4network(&(ip4h->daddr))) {
-		// Do not translate ipv4 packets (hair pin) that are toward v4network.
-		printk(KERN_DEBUG "ivi_v4v6_xmit: IPv4 packet toward the v4 network bypassed.\n");
+		// Do not translate ipv4 packets that are toward the v4 network where the host is located.
+		printk(KERN_DEBUG "ivi_v6v4_xmit: IPv4 packet to the host network bypassed on the sending routine.\n");
 		return -EINVAL;  // Just accept.
 	}
 */
-	if (addr_in_v4network(&(ip4h->saddr)) == 0) {
-		// Do not translate packets that are not from v4network, return 0 to drop packet.
-		printk(KERN_DEBUG "ivi_v4v6_xmit: drop IPv4 packet that are not from the v4 network.\n");
-		return 0;
-	}
-	
-	if (ip4h->ttl <= 1) {
-		// By pass the packet if its TTL reaches 1, the kernel routing system will
-		// drop the packet and send ICMPv4 error message to the source of the packet.
-		// Translating it will cause kernel to send ICMPv6 error message on v4dev
-		// interface, which will never be received.
-		printk(KERN_DEBUG "ivi_v4v6_xmit: by pass ipv4 packet with TTL = 1.\n");
-		return -EINVAL;  // Just accept.
-	}
-
 	if (addr_fmt != ADDR_FMT_NONE) {
 		__be16 newp;
 		
@@ -202,12 +238,13 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	skb_reserve(newskb, LL_RESERVED_SPACE((skb_dst(skb))->dev));
 	
 	ip6h = (struct ipv6hdr *)skb_put(newskb, hlen);
-	if (ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), addr_fmt) != 0) {
+	if (unlikely(ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), addr_fmt) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
-	
-	if (ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), ADDR_FMT_NONE) != 0) {
+
+	/* Do not append suffix for dst address translation */
+	if (unlikely(ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), ADDR_FMT_NONE) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
@@ -251,39 +288,23 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		default:
 			memcpy(payload, skb->data, plen);	
 	}
-/*
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->len = %u.\n", newskb->len);
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->head = %x\n", (unsigned int)(newskb->head));
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->data = %x\n", (unsigned int)(newskb->data));
-*/
+	
 	skb_dst_set(newskb, dst_clone(skb_dst(skb)));
 	skb_set_network_header(newskb, 0);
 	err = ip6_route_me_harder(newskb);
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "ivi_v4v6_xmit: ip6_route_me_harder() returned %d.\n", err);
-#endif
-/*
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->dst = %x.\n", (unsigned int)skb_dst(newskb));
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->dst->dev = %x\n", (unsigned int)(skb_dst(newskb)->dev));
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->dst->hh = %x\n", (unsigned int)(skb_dst(newskb)->hh));
-	printk(KERN_DEBUG "ivi_v4v6_xmit: newskb->dst->neighbour = %x\n", (unsigned int)(skb_dst(newskb)->neighbour));
-
-	rt = (struct rt6_info *)(skb_dst(newskb));
-	printk(KERN_DEBUG "ivi_v4v6_xmit: v6 gateway is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x.\n", 
-		ntohs(((__be16 *)&(rt->rt6i_gateway))[0]), ntohs(((__be16 *)&(rt->rt6i_gateway))[1]), 
-		ntohs(((__be16 *)&(rt->rt6i_gateway))[2]), ntohs(((__be16 *)&(rt->rt6i_gateway))[3]), 
-		ntohs(((__be16 *)&(rt->rt6i_gateway))[4]), ntohs(((__be16 *)&(rt->rt6i_gateway))[5]), 
-		ntohs(((__be16 *)&(rt->rt6i_gateway))[6]), ntohs(((__be16 *)&(rt->rt6i_gateway))[7]));
-*/
+	if (unlikely(err != 0)) {
+		printk(KERN_DEBUG "ivi_v4v6_xmit: ip6_route_me_harder() failed with return value %d.\n", err);
+		kfree_skb(newskb);
+		return 0;
+	}
+	
 	err = ip6_local_out(newskb);
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "ivi_v4v6_xmit: ip6_local_out() returned %d.\n", err);
-#endif
-	if (err == 0) {
+	if (likely(err == 0)) {
 		// Send IPv6 skb success. Free old skb and return 1.
 		kfree_skb(skb);
 		return 1;
 	} else {
+		printk(KERN_DEBUG "ivi_v4v6_xmit: ip6_local_out() failed with return value %d.\n", err);
 		return 0;  // Packet will be dropped by netfilter.
 	}
 }
@@ -314,28 +335,19 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 multicast packet, possibly ND packet.\n");
 		return -EINVAL;
 	}
-/*	
-	if (addr_in_v6network(&(ip6h->saddr))) {
-		// This should not happen since we have accepted all packets that are not from v6dev before calling this function.
-		printk(KERN_DEBUG "ivi_v6v4_xmit: v4dev translated packet received on IPv6 hook.\n");
-		return -EINVAL;  // Just accept.
-	}
-*/	
-	if (addr_in_v6network(&(ip6h->daddr)) == 0) {
+	
+	if (addr_is_v6host(&(ip6h->daddr)) == 0) {
 		// Do not translate packets that are not heading toward the v4 network.
-		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass packet that are not to the v4 network, routing system will handle them.\n");
+		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass packet that is not to the v4 host, routing system will handle them.\n");
 		return -EINVAL;  // Just accept.
 	}
-	
-	if (ip6h->hop_limit <= 1) {
-		// By pass the packet if its hop limit reaches 1, the kernel routing system will
-		// drop the packet and send ICMPv6 error message to the source of the packet.
-		// Translating it will cause kernel to send ICMPv4 error message on v6dev 
-		// interface, which will never be received.
-		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 packet with hop limit = 1.\n");
+/*
+	if (addr_in_v6network(&(ip6h->saddr))) {
+		// Do not translate packets that are from the v6 network where the host v4 network is mapped into.
+		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass packet that is from the host v6 network.\n");
 		return -EINVAL;  // Just accept.
 	}
-	
+*/
 	hlen = sizeof(struct iphdr);
 	plen = ntohs(ip6h->payload_len);
 	if (!(newskb = dev_alloc_skb(1600))) {
@@ -349,12 +361,12 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	memcpy(eth4, eth6, 12);
 	eth4->h_proto  = __constant_ntohs(ETH_P_IP);
 	ip4h = (struct iphdr *)skb_put(newskb, hlen);
-	if (ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr)) != 0) {
+	if (unlikely(ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr)) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
 	
-	if (ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr)) != 0) {
+	if (unlikely(ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr)) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}

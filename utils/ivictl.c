@@ -22,11 +22,11 @@ int main(int argc, char *argv[]) {
 	if ((argc == 6) && (strcmp(argv[1], "start") == 0)) {
 		// Set v4 network
 		if ((retval = inet_pton(AF_INET, argv[2], (void*)(&v4addr))) != 1) {
-			printf("Error: failed to parse IPv4 network prefix, code %d.\n", retval);
+			printf("Error: failed to parse IPv4 address, code %d.\n", retval);
 			exit(-1);
 		}
 		if ((retval = ioctl(fd, IVI_IOC_V4NET, &(v4addr.s_addr))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix, code %d.\n", retval);
+			printf("Error: failed to assign IPv4 address, code %d.\n", retval);
 			exit(-1);
 		}
 		temp = atoi(argv[3]);
@@ -90,7 +90,7 @@ int main(int argc, char *argv[]) {
 		printf("Info: successfully set address format.\n");
 	}
 	else {
-		printf("Usage: ivictl start v4_prefix v4_prefix_len v6_prefix v6_prefix_len\n");
+		printf("Usage: ivictl start v4_host_addr v4_prefix_len v6_prefix v6_prefix_len\n");
 		printf("       ivictl format postfix ratio offset\n");
 		printf("       ivictl format suffix ratio offset\n");
 		printf("       ivictl stop\n");

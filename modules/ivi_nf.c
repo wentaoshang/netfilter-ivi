@@ -21,15 +21,7 @@ unsigned int nf_hook4(unsigned int hooknum, struct sk_buff *skb,
 	if (!running) {
 		return NF_ACCEPT;
 	}
-/*
-	printk(KERN_DEBUG "nf_hook4: skb_dst = %x\n", (unsigned int)skb_dst(skb));
-	printk(KERN_DEBUG "nf_hook4: skb_dst->dev = %x\n", (unsigned int)(skb_dst(skb)->dev));
-	printk(KERN_DEBUG "nf_hook4: skb->len = %u.\n", skb->len);
-	printk(KERN_DEBUG "nf_hook4: skb->head = %x\n", (unsigned int)(skb->head));
-	printk(KERN_DEBUG "nf_hook4: skb->data = %x\n", (unsigned int)(skb->data));
-	printk(KERN_DEBUG "nf_hook4: skb_dst->dev = %x\n", (unsigned int)(skb_dst(skb)->dev));
-	printk(KERN_DEBUG "nf_hook4: skb mac header is set = %d\n", skb_mac_header_was_set(skb));
-*/
+
 	ret = ivi_v4v6_xmit(skb);
 	
 	if (ret == 0) {
