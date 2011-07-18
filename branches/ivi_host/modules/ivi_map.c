@@ -62,7 +62,7 @@ struct map_tuple* add_new_map(__be16 oldp, __be16 newp, __be16 last, struct map_
 	struct map_tuple *map;
 	map = (struct map_tuple*)kmalloc(sizeof(struct map_tuple), GFP_ATOMIC);
 	if (map == NULL) {
-		printk("add_new_map: kmalloc failed for map_tuple.\n");
+		printk(KERN_DEBUG "add_new_map: kmalloc failed for map_tuple.\n");
 		return NULL;
 	}
 	
@@ -75,7 +75,7 @@ struct map_tuple* add_new_map(__be16 oldp, __be16 newp, __be16 last, struct map_
 	list->last_alloc = last;
 	list->used[newp] = 1;
 #ifdef IVI_DEBUG
-	printk("add_new_map: new map added: %d -> %d.\n", oldp, newp );
+	printk(KERN_DEBUG "add_new_map: new map added: %d -> %d.\n", oldp, newp );
 #endif
 	return map;
 }
@@ -97,7 +97,7 @@ void refresh_map_list(struct map_list *list)
 			list->size--;
 			list->used[iter->newport] = 0;
 #ifdef IVI_DEBUG
-			printk("refresh_map_list: map %d -> %d time out.\n", iter->oldport, iter->newport);
+			printk(KERN_DEBUG "refresh_map_list: map %d -> %d time out.\n", iter->oldport, iter->newport);
 #endif
 			kfree(iter);
 		}
@@ -142,7 +142,7 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 	
 	if (get_list_size(list) >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&list->lock);
-		printk("get_outflow_map_port: map list full.\n");
+		printk(KERN_DEBUG "get_outflow_map_port: map list full.\n");
 		return -1;
 	}
 	
@@ -154,7 +154,9 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 			if (iter->oldport == oldp) {
 				retport = iter->newport;
 				do_gettimeofday(&iter->timer);
-				printk("get_outflow_map_port: find map %d -> %d.\n", oldp, retport);
+#ifdef IVI_DEBUG
+				printk(KERN_DEBUG "get_outflow_map_port: find map %d -> %d.\n", oldp, retport);
+#endif
 				break;
 			}
 		}
@@ -192,7 +194,7 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&list->lock);
-				printk("get_outflow_map_port: failed to assign a new map port for port: %d.\n", oldp);
+				printk(KERN_DEBUG "get_outflow_map_port: failed to assign a new map port for port: %d.\n", oldp);
 				return -1;
 			}
 		}
@@ -225,7 +227,7 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 	
 	if (list_empty(&list->chain)) {
 		spin_unlock_bh(&list->lock);
-		printk("get_inflow_map_port: map list empty.\n");
+		printk(KERN_DEBUG "get_inflow_map_port: map list empty.\n");
 		return -1;
 	}
 
@@ -233,7 +235,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 		if (iter->newport == newp) {
 			*oldp = iter->oldport;
 			do_gettimeofday(&iter->timer);
-			printk("get_inflow_map_port: find map %d -> %d.\n", *oldp, newp);
+#ifdef IVI_DEBUG
+			printk(KERN_DEBUG "get_inflow_map_port: find map %d -> %d.\n", *oldp, newp);
+#endif
 			ret = 0;
 			break;
 		}

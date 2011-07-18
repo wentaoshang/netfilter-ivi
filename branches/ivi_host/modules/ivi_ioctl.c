@@ -37,11 +37,11 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			break;
 		
 		case IVI_IOC_V4NET:
-			if (copy_from_user(&v4network, (__be32 *)arg, sizeof(__be32)) > 0) {
+			if (copy_from_user(&v4addr, (__be32 *)arg, sizeof(__be32)) > 0) {
 				return -EACCES;
 			}
-			v4network = ntohl(v4network);
-			printk(KERN_INFO "ivi_ioctl: v4 network set to %08x.\n", v4network);
+			v4addr = ntohl(v4addr);
+			printk(KERN_INFO "ivi_ioctl: v4 address set to %08x.\n", v4addr);
 			break;
 		
 		case IVI_IOC_V4MASK:
@@ -114,14 +114,14 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 
 static int ivi_open(struct inode *inode, struct file *file) {
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "a new virtual device is opened for ioctl.\n");
+	printk(KERN_DEBUG "ivi_open: ivi virtual device is opened for ioctl.\n");
 #endif
 	return 0;
 }
 
 static int ivi_release(struct inode *inode, struct file *file) {
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "a virtual device for ioctl is closed.\n");
+	printk(KERN_DEBUG "ivi_release: ivi virtual device for ioctl is closed.\n");
 #endif
 	return 0;
 }
