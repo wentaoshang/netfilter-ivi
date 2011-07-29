@@ -150,6 +150,11 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	struct icmp6hdr *icmp6h;
 	__u8 *payload;
 	int hlen, plen;
+
+	/*
+	 * We are not always in process context. For example, TCP retransmission is in interrupt context.
+	 */
+	gfp_t alloc_prio = in_softirq() ? GFP_ATOMIC : GFP_KERNEL;
 	
 	//struct rt6_info *rt;
 	
@@ -231,7 +236,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 
 	hlen = sizeof(struct ipv6hdr);
 	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
-	if (!(newskb = alloc_skb(1600, GFP_KERNEL))) {
+	if (!(newskb = alloc_skb(1600, alloc_prio))) {
 		printk(KERN_ERR "ivi_v4v6_xmit: failed to allocate new socket buffer.\n");
 		return 0;  // Drop packet on low memory
 	}
