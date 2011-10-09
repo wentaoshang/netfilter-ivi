@@ -106,6 +106,13 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
 			break;
 
+		case IVI_IOC_MSS_LIMIT:
+			if (copy_from_user(&mss_limit, (__u16 *)arg, sizeof(__u16)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: mss limit set to %d.\n", mss_limit);
+			break;
+		
 		default:
 			retval = -ENOTTY;
 	}

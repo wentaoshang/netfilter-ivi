@@ -18,5 +18,7 @@
 #define IVI_IOC_POSTFIX	_IOW(IVI_IOCTL, 0x1b, int)
 #define IVI_IOC_SUFFIX	_IOW(IVI_IOCTL, 0x1c, int)
 
+#define IVI_IOC_MSS_LIMIT	_IOW(IVI_IOCTL, 0x1d, int)
+
 #endif /* IVI_IOCTL_H */
 

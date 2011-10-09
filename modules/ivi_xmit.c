@@ -40,6 +40,9 @@ EXPORT_SYMBOL(v6prefixlen);
 __u8 addr_fmt = 0;  // ivi translated address format
 EXPORT_SYMBOL(addr_fmt);
 
+__u16 mss_limit = 1340;  // max mss supported
+EXPORT_SYMBOL(mss_limit);
+
 /*
  * Returns whether the v4 address belongs to the same network with the host.
  */
@@ -264,6 +267,16 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		case IPPROTO_TCP:
 			skb_copy_bits(skb, ip4h->ihl * 4, payload, plen);
 			tcph = (struct tcphdr *)payload;
+
+			if (tcph->syn && !tcph->ack && (tcph->doff > 5)) {
+				__u16 *option = (__u16*)tcph;
+				if (option[10] == htons(0x0204)) {
+					if (ntohs(option[11] > mss_limit)) {
+						option[11] = htons(mss_limit);
+					}
+				}
+			}
+			
 			tcph->check = 0;
 			tcph->check = csum_ipv6_magic(&(ip6h->saddr), &(ip6h->daddr), plen, IPPROTO_TCP, csum_partial(payload, plen, 0));
 			break;
