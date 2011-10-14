@@ -174,11 +174,27 @@ int main(int argc, char *argv[]) {
 		}
 		printf("Info: successfully set address format.\n");
 	}
+	else if ((argc == 4) && (strcmp(argv[1], "mss") == 0)) {
+		unsigned short mss_val;
+		mss_val = atoi(argv[3]);
+		if (strcmp(argv[2], "limit") == 0) {
+			if ((retval = ioctl(fd, IVI_IOC_MSS_LIMIT, (void*)(&mss_val))) < 0) {
+				printf("Error: failed to set mss limit, code %d.\n", retval);
+				exit(-1);
+			}
+		}
+		else {
+			printf("Error: unknown mss option type %s.\n", argv[2]);
+			exit(-1);
+		}
+		printf("Info: successfully set mss.\n");
+	}
 	else {
 		printf("Usage: ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len]\n");
 		printf("       ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v4_public_addr] [v6_prefix] [v6_prefix_len]\n");
 		printf("       ivictl format postfix [ratio] [offset]\n");
 		printf("       ivictl format suffix [ratio] [offset]\n");
+		printf("       ivictl mss limit mss_val\n");
 		printf("       ivictl stop\n");
 	}
 
