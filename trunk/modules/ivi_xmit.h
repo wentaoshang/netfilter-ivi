@@ -35,6 +35,8 @@ extern __u8 addr_fmt;
 #define ADDR_FMT_POSTFIX    1   // 1:N old format, append ratio and offset at the end of the IPv6 address
 #define ADDR_FMT_SUFFIX     2   // 1:N new format, append compressed ratio and offset code at the tail of the embed IPv4 address
 
+extern __u16 mss_limit;
+
 extern int ivi_v4v6_xmit(struct sk_buff *skb);
 extern int ivi_v6v4_xmit(struct sk_buff *skb);
 extern int ivi_v4_dev(struct net_device *dev);
