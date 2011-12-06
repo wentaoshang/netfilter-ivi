@@ -17,9 +17,9 @@ ifconfig eth1 202.38.111.254/24
 
 # Add virtual route info for IPv4. This route is used only when forwarding packets with TTL = 1.
 # The gw is invalid since eth0 is the IPv6 interface. See 'ivi_xmit.c' for more information.
-ifconfig eth0 202.38.101.44/26
-route add default gw 202.38.101.1 eth0
+#ifconfig eth0 202.38.101.44/26
+#route add default gw 202.38.101.1 eth0
 
 # Add virtual route info for IPv6. See above for the reason to do this.
-ifconfig eth1 inet6 add 2001:da8:a123:500::/64
-ip -6 route add 2001:da8:c4c6:ca26:6f00::/72 via 2001:da8:a123:500::1 dev eth1
+#ifconfig eth1 inet6 add 2001:da8:a123:500::/64
+#ip -6 route add 2001:da8:c4c6:ca26:6f00::/72 via 2001:da8:a123:500::1 dev eth1
