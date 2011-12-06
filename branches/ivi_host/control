@@ -13,6 +13,8 @@ start() {
 	echo "Starting IVI modules: "
 	insmod modules/ivi_map.ko
 	echo "insmod ivi_map.ko"
+	insmod modules/ivi_map_tcp.ko
+	echo "insmod ivi_map_tcp.ko"
 	insmod modules/ivi_xmit.ko
 	echo "insmod ivi_xmit.ko"
 	insmod modules/ivi_nf.ko
@@ -35,6 +37,8 @@ stop() {
 		echo "rmmod ivi_nf"
 		rmmod ivi_xmit
 		echo "rmmod ivi_xmit"
+		rmmod ivi_map_tcp
+		echo "rmmod ivi_map_tcp"
 		rmmod ivi_map
 		echo "rmmod ivi_map"
 		rm /dev/ivi

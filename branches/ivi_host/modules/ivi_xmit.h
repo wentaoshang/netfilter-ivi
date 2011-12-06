@@ -23,11 +23,14 @@
 #include <net/route.h>
 #include "ivi_config.h"
 #include "ivi_map.h"
+#include "ivi_map_tcp.h"
 
 extern __be32 v4addr;
 extern __be32 v4mask;
 extern __u8 v6prefix[16];
 extern __be32 v6prefixlen;
+extern __u8 v6default[16];
+extern __be32 v6defaultlen;
 
 extern __u8 addr_fmt;
 #define ADDR_FMT_NONE       0   // 1:1 xlate format

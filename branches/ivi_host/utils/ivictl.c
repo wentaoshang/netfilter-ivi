@@ -50,6 +50,71 @@ int main(int argc, char *argv[]) {
 			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
 			exit(-1);
 		}
+
+		// Set v6 default prefix
+		if ((retval = ioctl(fd, IVI_IOC_PD_DEFAULT, v6addr.s6_addr)) < 0) {
+			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
+			exit(-1);
+		}
+		if ((retval = ioctl(fd, IVI_IOC_PD_DEFAULT_LEN, &(temp))) < 0) {
+			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
+			exit(-1);
+		}
+		
+		// Start ivi
+		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
+			printf("Error: failed to start IVI module, code %d.\n", retval);
+			exit(-1);
+		}
+		
+		printf("Info: successfully started IVI module.\n");
+	}
+	else if ((argc == 8) && (strcmp(argv[1], "start") == 0)) {
+		// Set v4 network
+		if ((retval = inet_pton(AF_INET, argv[2], (void*)(&v4addr))) != 1) {
+			printf("Error: failed to parse IPv4 address, code %d.\n", retval);
+			exit(-1);
+		}
+		if ((retval = ioctl(fd, IVI_IOC_V4NET, &(v4addr.s_addr))) < 0) {
+			printf("Error: failed to assign IPv4 address, code %d.\n", retval);
+			exit(-1);
+		}
+		temp = atoi(argv[3]);
+		mask = 0xffffffff << (32 - temp);
+		if ((retval = ioctl(fd, IVI_IOC_V4MASK, &(mask))) < 0) {
+			printf("Error: failed to assign IPv4 network prefix length, code %d.\n", retval);
+			exit(-1);
+		}
+		
+		// Set v6 network
+		if ((retval = inet_pton(AF_INET6, argv[4], (void*)(&v6addr))) != 1) {
+			printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
+			exit(-1);
+		}
+		if ((retval = ioctl(fd, IVI_IOC_V6NET, v6addr.s6_addr)) < 0) {
+			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
+			exit(-1);
+		}
+		temp = atoi(argv[5]) / 8;  // counted in bytes
+		if ((retval = ioctl(fd, IVI_IOC_V6MASK, &(temp))) < 0) {
+			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
+			exit(-1);
+		}
+
+		// Set v6 default prefix
+		if ((retval = inet_pton(AF_INET6, argv[6], (void*)(&v6addr))) != 1) {
+			printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
+			exit(-1);
+		}
+		if ((retval = ioctl(fd, IVI_IOC_PD_DEFAULT, v6addr.s6_addr)) < 0) {
+			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
+			exit(-1);
+		}
+		temp = atoi(argv[7]) / 8;  // counted in bytes
+		if ((retval = ioctl(fd, IVI_IOC_PD_DEFAULT_LEN, &(temp))) < 0) {
+			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
+			exit(-1);
+		}
 		
 		// Start ivi
 		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
@@ -105,10 +170,11 @@ int main(int argc, char *argv[]) {
 		printf("Info: successfully set mss.\n");
 	}
 	else {
-		printf("Usage: ivictl start v4_host_addr v4_prefix_len v6_prefix v6_prefix_len\n");
-		printf("       ivictl format postfix ratio offset\n");
-		printf("       ivictl format suffix ratio offset\n");
-		printf("       ivictl mss limit mss_val\n");
+		printf("Usage: ivictl start [v4_host_addr] [v4_prefix_len] [v6_prefix] [v6_prefix_len]\n");
+		printf("       ivictl start [v4_host_addr] [v4_prefix_len] [v6_prefix] [v6_prefix_len] [default_prefix] [default_prefix_len]\n");
+		printf("       ivictl format postfix [ratio] [offset]\n");
+		printf("       ivictl format suffix [ratio] [offset]\n");
+		printf("       ivictl mss limit [mss_val]\n");
 		printf("       ivictl stop\n");
 	}
 

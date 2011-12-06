@@ -10,9 +10,6 @@
 
 #include "ivi_map.h"
 
-struct map_list tcp_list;
-EXPORT_SYMBOL(tcp_list);
-
 struct map_list udp_list;
 EXPORT_SYMBOL(udp_list);
 
@@ -250,7 +247,6 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 EXPORT_SYMBOL(get_inflow_map_port);
 
 static int __init ivi_map_init(void) {
-	init_map_list(&tcp_list, 1200);
 	init_map_list(&udp_list, 60);
 	init_map_list(&icmp_list, 30);
 #ifdef IVI_DEBUG
@@ -261,7 +257,6 @@ static int __init ivi_map_init(void) {
 module_init(ivi_map_init);
 
 static void __exit ivi_map_exit(void) {
-	free_map_list(&tcp_list);
 	free_map_list(&udp_list);
 	free_map_list(&icmp_list);
 #ifdef IVI_DEBUG
