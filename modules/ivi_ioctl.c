@@ -158,7 +158,23 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			}
 			printk(KERN_INFO "ivi_ioctl: mss limit set to %d.\n", mss_limit);
 			break;
-
+		
+		case IVI_IOC_PD_DEFAULT:
+			if (copy_from_user(v6default, (__u8 *)arg, 16) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: default pd prefix set to %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x.\n", 
+				ntohs(((__be16 *)v6default)[0]), ntohs(((__be16 *)v6default)[1]), ntohs(((__be16 *)v6default)[2]), ntohs(((__be16 *)v6default)[3]), 
+				ntohs(((__be16 *)v6default)[4]), ntohs(((__be16 *)v6default)[5]), ntohs(((__be16 *)v6default)[6]), ntohs(((__be16 *)v6default)[7]));
+			break;
+		
+		case IVI_IOC_PD_DEFAULT_LEN:
+			if (copy_from_user(&v6defaultlen, (__be32 *)arg, sizeof(__be32)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: default pd prefix length set to %d.\n", v6defaultlen);
+			break;
+		
 		default:
 			retval = -ENOTTY;
 	}

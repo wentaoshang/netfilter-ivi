@@ -25,6 +25,9 @@
 
 #define IVI_IOC_MSS_LIMIT	_IOW(IVI_IOCTL, 0x1d, int)
 
+#define IVI_IOC_PD_DEFAULT	_IOW(IVI_IOCTL, 0x1e, int)
+#define IVI_IOC_PD_DEFAULT_LEN	_IOW(IVI_IOCTL, 0x1f, int)
+
 #define IVI_IOCTL_LEN	32
 
 #endif /* IVI_IOCTL_H */
