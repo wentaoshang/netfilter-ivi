@@ -30,6 +30,8 @@ extern __u8 use_nat44;
 extern __be32 v4publicaddr;
 extern __u8 v6prefix[16];
 extern __be32 v6prefixlen;
+extern __u8 v6default[16];
+extern __be32 v6defaultlen;
 
 extern __u8 addr_fmt;
 #define ADDR_FMT_NONE       0   // 1:1 xlate format
