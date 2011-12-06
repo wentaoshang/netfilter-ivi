@@ -161,6 +161,9 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 packet with TTL = 1.\n");
 		return -EINVAL;  // Just accept.
 	}
+	
+	hlen = sizeof(struct ipv6hdr);
+	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
 
 	if (use_nat44 == 1 || addr_fmt != ADDR_FMT_NONE) {
 		__be16 newp;
@@ -170,7 +173,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			case IPPROTO_TCP:
 				tcph = (struct tcphdr *)payload;
 				
-				if (get_outflow_map_port(ntohl(ip4h->saddr), ntohs(tcph->source), &tcp_list, &newp) == -1) {
+				if (get_outflow_tcp_map_port(ntohl(ip4h->saddr), ntohs(tcph->source), tcph, plen, &newp) == -1) {
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (TCP).\n", ntohl(ip4h->saddr), ntohs(tcph->source));
 					// Just let the packet pass with original address.
 				} else {
@@ -226,8 +229,6 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		}
 	}
 	
-	hlen = sizeof(struct ipv6hdr);
-	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
 	if (!(newskb = dev_alloc_skb(1600))) {
 		printk(KERN_ERR "ivi_v4v6_xmit: failed to allocate new socket buffer.\n");
 		return 0;  // Drop packet on low memory
@@ -400,7 +401,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				__be32 oldaddr;
 				__be16 oldp;
 				
-				if (get_inflow_map_port(ntohs(tcph->dest), &tcp_list, &oldaddr, &oldp) == -1) {
+				if (get_inflow_tcp_map_port(ntohs(tcph->dest), tcph, plen, &oldaddr, &oldp) == -1) {
 					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (TCP).\n", ntohs(tcph->dest));
 				} else {
 					// DNAT-PT

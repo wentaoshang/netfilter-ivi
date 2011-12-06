@@ -22,6 +22,7 @@
 #include <net/route.h>
 #include "ivi_config.h"
 #include "ivi_map.h"
+#include "ivi_map_tcp.h"
 
 extern __be32 v4network;
 extern __be32 v4mask;
