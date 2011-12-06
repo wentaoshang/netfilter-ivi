@@ -37,6 +37,13 @@ EXPORT_SYMBOL(v6prefix);
 __be32 v6prefixlen = 8;  // "/64" ivi prefix length in bytes (8)
 EXPORT_SYMBOL(v6prefixlen);
 
+// default v6 prefix where the ipv4 dest addr is mapped into.
+__u8 v6default[16] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::" in network byte order
+EXPORT_SYMBOL(v6default);
+
+__be32 v6defaultlen = 8;  // "/64" prefix length in bytes (8)
+EXPORT_SYMBOL(v6defaultlen);
+
 __u8 addr_fmt = 0;  // ivi translated address format
 EXPORT_SYMBOL(addr_fmt);
 
@@ -109,38 +116,39 @@ int addr_is_v6host(const struct in6_addr *addr) {
 	return (embed == v4addr);
 }
 
-int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, __u8 fmt) {
+int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, __u8 *prefix, __be32 prefixlen, __u8 fmt) {
 	unsigned int addr = ntohl(*v4addr);
 	
 	memset(v6addr, 0, sizeof(struct in6_addr));
-	memcpy(v6addr->s6_addr, v6prefix, v6prefixlen);
-	v6addr->s6_addr[v6prefixlen] = (unsigned char)(addr >> 24);
-	v6addr->s6_addr[v6prefixlen + 1] = (unsigned char)((addr >> 16) & 0xff);
-	v6addr->s6_addr[v6prefixlen + 2] = (unsigned char)((addr >> 8) & 0xff);
-	v6addr->s6_addr[v6prefixlen + 3] = (unsigned char)(addr & 0xff);
+	memcpy(v6addr->s6_addr, prefix, prefixlen);
+	v6addr->s6_addr[prefixlen] = (unsigned char)(addr >> 24);
+	v6addr->s6_addr[prefixlen + 1] = (unsigned char)((addr >> 16) & 0xff);
+	v6addr->s6_addr[prefixlen + 2] = (unsigned char)((addr >> 8) & 0xff);
+	v6addr->s6_addr[prefixlen + 3] = (unsigned char)(addr & 0xff);
 	
 	if (fmt == ADDR_FMT_POSTFIX) {
 		v6addr->s6_addr16[6] = htons(ratio);
 		v6addr->s6_addr16[7] = htons(offset);
 	} else if (fmt == ADDR_FMT_SUFFIX) {
-		v6addr->s6_addr[v6prefixlen + 4] = (suffix >> 8) & 0xff;
-		v6addr->s6_addr[v6prefixlen + 5] = suffix & 0xff;
+		v6addr->s6_addr[prefixlen + 4] = (suffix >> 8) & 0xff;
+		v6addr->s6_addr[prefixlen + 5] = suffix & 0xff;
 	}
 	
 	return 0;  // This function always succeed.
 }
 
-int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr) {
+int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, __be32 prefixlen) {
 	__be32 addr = 0;
 	
-	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen]) << 24;
-	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen + 1]) << 16;
-	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen + 2]) << 8;
-	addr |= ((unsigned int)v6addr->s6_addr[v6prefixlen + 3]);
+	addr |= ((unsigned int)v6addr->s6_addr[prefixlen]) << 24;
+	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 1]) << 16;
+	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 2]) << 8;
+	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 3]);
 	*v4addr = htonl(addr);
 	
 	return 0;  // This function always succeed.
 }
+
 
 int ivi_v4v6_xmit(struct sk_buff *skb) {
 	int err;
@@ -186,6 +194,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		return -EINVAL;  // Just accept.
 	}
 */
+
+	hlen = sizeof(struct ipv6hdr);
+	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
+	
 	if (addr_fmt != ADDR_FMT_NONE) {
 		__be16 newp;
 		
@@ -194,7 +206,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			case IPPROTO_TCP:
 				tcph = (struct tcphdr *)payload;
 				
-				if (get_outflow_map_port(ntohs(tcph->source), &tcp_list, &newp) == -1) {
+				if (get_outflow_tcp_map_port(ntohs(tcph->source), tcph, plen, &newp) == -1) {
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for port %d (TCP).\n", ntohs(tcph->source));
 					// Just let the packet pass with original address.
 				} else {
@@ -237,8 +249,6 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		}
 	}
 
-	hlen = sizeof(struct ipv6hdr);
-	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
 	if (!(newskb = alloc_skb(1600, alloc_prio))) {
 		printk(KERN_ERR "ivi_v4v6_xmit: failed to allocate new socket buffer.\n");
 		return 0;  // Drop packet on low memory
@@ -246,13 +256,13 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	skb_reserve(newskb, LL_RESERVED_SPACE((skb_dst(skb))->dev));
 	
 	ip6h = (struct ipv6hdr *)skb_put(newskb, hlen);
-	if (unlikely(ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), addr_fmt) != 0)) {
+	if (unlikely(ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), v6prefix, v6prefixlen, addr_fmt) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
 
 	/* Do not append suffix for dst address translation */
-	if (unlikely(ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), ADDR_FMT_NONE) != 0)) {
+	if (unlikely(ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), v6default, v6defaultlen, ADDR_FMT_NONE) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
@@ -271,7 +281,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			if (tcph->syn && !tcph->ack && (tcph->doff > 5)) {
 				__u16 *option = (__u16*)tcph;
 				if (option[10] == htons(0x0204)) {
-					if (ntohs(option[11] > mss_limit)) {
+					if (ntohs(option[11]) > mss_limit) {
 						option[11] = htons(mss_limit);
 					}
 				}
@@ -379,12 +389,12 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	memcpy(eth4, eth6, 12);
 	eth4->h_proto  = __constant_ntohs(ETH_P_IP);
 	ip4h = (struct iphdr *)skb_put(newskb, hlen);
-	if (unlikely(ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr)) != 0)) {
+	if (unlikely(ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), v6defaultlen) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
 	
-	if (unlikely(ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr)) != 0)) {
+	if (unlikely(ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), v6prefixlen) != 0)) {
 		kfree_skb(newskb);
 		return 0;
 	}
@@ -405,7 +415,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 			if (addr_fmt != ADDR_FMT_NONE) {
 				__be16 oldp;
 				
-				if (get_inflow_map_port(ntohs(tcph->dest), &tcp_list, &oldp) == -1) {
+				if (get_inflow_tcp_map_port(ntohs(tcph->dest), tcph, plen, &oldp) == -1) {
 					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for port %d (TCP).\n", ntohs(tcph->dest));
 					kfree_skb(newskb);
 					return 0;
