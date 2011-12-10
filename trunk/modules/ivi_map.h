@@ -4,12 +4,12 @@
  * Contents      :
  *    This file is the header file for the 'ivi_map.c' file,
  *    which contains all the system header files and definitions
- *    used in the 'nfivi_map.c' file.
+ *    used in the 'ivi_map.c' file.
  *
  */
 
-#ifndef NFIVI_MAP_H
-#define NFIVI_MAP_H
+#ifndef IVI_MAP_H
+#define IVI_MAP_H
 
 #include <linux/module.h>
 
@@ -21,7 +21,12 @@
 
 /* map entry structure */
 struct map_tuple {
+#ifdef IVI_HASH
+	struct hlist_node out_node;  // Inserted to out_chain
+	struct hlist_node in_node;   // Inserted to in_chain
+#else
 	struct list_head node;
+#endif
 	__be32 oldaddr;
 	__be16 oldport;
 	__be16 newport;
@@ -31,12 +36,33 @@ struct map_tuple {
 /* map list structure */
 struct map_list {
 	spinlock_t lock;
+#ifdef IVI_HASH
+	struct hlist_head out_chain[IVI_HTABLE_SIZE];  // Map table from oldport to newport
+	struct hlist_head in_chain[IVI_HTABLE_SIZE];   // Map table from newport to oldport
+#else
 	struct list_head chain;
+#endif
 	int size;
+	__be16 last_alloc;  // Save the last allocate port number
 	time_t timeout;
-	__be16 last_alloc;  // This field is meaningless for 1:1 mapping since we will use the old port directly without allocating a new one.
-	__u8 used[65536];
 };
+
+#ifdef IVI_HASH
+// Generic hash function for a 16 bit value, see 'Introduction to Algorithms, 2nd Edition' Section 11.3.2
+__inline int port_hashfn(__be16 port)
+{
+	unsigned int m = port * GOLDEN_RATIO_16;
+	return ((m & 0xf800) >> 11);  // extract 11bit to 16bit as hash result
+}
+
+// Generic hash function for a 32 bit value, see 'Introduction to Algorithms, 2nd Edition' Section 11.3.2
+__inline int v4addr_port_hashfn(__be32 addr, __be16 port)
+{
+	__be32 m = addr + port;
+	m *= GOLDEN_RATIO_32;
+	return ((m & 0xf8000000) >> 27);
+}
+#endif
 
 /* global map list variables */
 extern __be16 ratio;
@@ -55,5 +81,4 @@ extern void free_map_list(struct map_list *list);
 extern int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp);
 extern int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __be16 *oldp);
 
-#endif
-
+#endif /* IVI_MAP_H */
