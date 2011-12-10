@@ -24,4 +24,3 @@
 #define IVI_IOC_PD_DEFAULT_LEN	_IOW(IVI_IOCTL, 0x1f, int)
 
 #endif /* IVI_IOCTL_H */
-
