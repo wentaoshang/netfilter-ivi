@@ -1,5 +1,5 @@
-#ifndef IVI_XMIT
-#define IVI_XMIT
+#ifndef IVI_XMIT_H
+#define IVI_XMIT_H
 
 #ifdef __KERNEL__
 
@@ -44,4 +44,4 @@ extern int ivi_v6v4_xmit(struct sk_buff *skb);
 
 
 #endif	/* __KERNEL__ */
-#endif	/* IVI_XMIT */
+#endif	/* IVI_XMIT_H */
