@@ -68,6 +68,7 @@ __inline int v4addr_port_hashfn(__be32 addr, __be16 port)
 extern __be16 ratio;
 extern __be16 offset;
 extern __be16 suffix;
+extern __be16 adjacent;
 
 extern struct map_list udp_list;
 extern struct map_list icmp_list;
