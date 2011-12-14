@@ -28,6 +28,9 @@ EXPORT_SYMBOL(offset);
 __be16 suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
 EXPORT_SYMBOL(suffix);
 
+__be16 adjacent = 1;
+EXPORT_SYMBOL(adjacent);
+
 /* list operations */
 
 // Get current size of the list, must be protected by spin lock when calling this function
@@ -198,7 +201,7 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 	}
 	
 	if (retport == 0) {
-		__be16 rover;
+		__be16 rover_j, rover_k;
 
 		if (ratio == 1) {
 			// We are in 1:1 mapping mode, use old port directly.
@@ -207,23 +210,35 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 			int remaining;
 			__be16 low, high;
 			
-			low = (__u16)(1023 / ratio) + 1;
-			high = (__u16)(65536 / ratio) - 1;
+			low = (__u16)(1023 / ratio / adjacent) + 1;
+			high = (__u16)(65536 / ratio / adjacent) - 1;
 			remaining = (high - low) + 1;
 			
-			if (list->last_alloc != 0)
-				rover = list->last_alloc / ratio + 1;
-			else
-				rover = low;
+			if (list->last_alloc != 0) {
+				rover_j = list->last_alloc / ratio / adjacent;
+				rover_k = list->last_alloc % adjacent + 1;
+				if (rover_k == adjacent) {
+					rover_j++;
+					rover_k = 0;
+				}
+			} else {
+				rover_j = low;
+				rover_k = 0;
+			}
 			
 			do { 
-				retport = rover * ratio + offset;
+				retport = (rover_j * ratio + offset) * adjacent + rover_k;
 				if (!port_in_use(retport, list))
 					break;
 				
-				if (++rover > high)
-					rover = low;
-				
+				rover_k++;
+				if (rover_k == adjacent) {
+					rover_j++;
+					remaining--;
+					rover_k = 0;
+					if (rover_j > high)
+						rover_j = low;
+				}
 			} while (--remaining > 0);
 			
 			if (remaining <= 0) {
@@ -422,33 +437,44 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 	}
 	
 	if (retport == 0) {
-		__be16 rover;
+		__be16 rover_j, rover_k;
 
 		if (ratio == 1) {
 			// We are in 1:1 mapping mode, use old port directly.
 			retport = oldp;
-			rover = retport; // rover is meaningless in 1:1 mapping mode.
 		} else {
 			int remaining;
 			__be16 low, high;
 			
-			low = (__u16)(1023 / ratio) + 1;
-			high = (__u16)(65536 / ratio) - 1;
+			low = (__u16)(1023 / ratio / adjacent) + 1;
+			high = (__u16)(65536 / ratio / adjacent) - 1;
 			remaining = (high - low) + 1;
 			
-			if (list->last_alloc != 0)
-				rover = list->last_alloc / ratio + 1;
-			else
-				rover = low;
+			if (list->last_alloc != 0) {
+				rover_j = list->last_alloc / ratio / adjacent;
+				rover_k = list->last_alloc % adjacent + 1;
+				if (rover_k == adjacent) {
+					rover_j++;
+					rover_k = 0;
+				}
+			} else {
+				rover_j = low;
+				rover_k = 0;
+			}
 			
 			do { 
-				retport = rover * ratio + offset;
+				retport = (rover_j * ratio + offset) * adjacent + rover_k;
 				if (!port_in_use(retport, list))
 					break;
 				
-				if (++rover > high)
-					rover = low;
-				
+				rover_k++;
+				if (rover_k == adjacent) {
+					rover_j++;
+					remaining--;
+					rover_k = 0;
+					if (rover_j > high)
+						rover_j = low;
+				}
 			} while (--remaining > 0);
 			
 			if (remaining <= 0) {

@@ -112,16 +112,23 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			use_nat44 = 0;
 			printk(KERN_INFO "ivi_ioctl: nat44 disabled.\n");
 			break;
+
+		case IVI_IOC_ADJACENT:
+			if (copy_from_user(&adjacent, (__be16 *)arg, sizeof(__be16)) > 0) {
+				return -EACCES;
+			}
+			printk(KERN_INFO "ivi_ioctl: adjacent set to %d.\n", adjacent);
+			break;
 		
 		case IVI_IOC_POSTFIX:
 			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: ratio set to %04x.\n", ratio);
+			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", ratio);
 			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: offset set to %04x.\n", offset);
+			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", offset);
 			addr_fmt = ADDR_FMT_POSTFIX;
 			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
 			break;
@@ -130,11 +137,11 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: ratio set to %04x.\n", ratio);
+			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", ratio);
 			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: offset set to %04x.\n", offset);
+			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", offset);
 			
 			suffix = 0;
 			tmp = ratio;
