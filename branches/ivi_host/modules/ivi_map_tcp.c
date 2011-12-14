@@ -869,7 +869,7 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 	
 	if (retport == 0) // No existing map, generate new map
 	{
-    		__be16 rover;
+    		__be16 rover_j, rover_k;
 
 		if (ratio == 1) {
 			// We are in 1:1 mapping mode, use old port directly.
@@ -878,23 +878,35 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 			int remaining;
 			__be16 low, high;
 			
-			low = (__u16)(1023 / ratio) + 1;
-			high = (__u16)(65536 / ratio) - 1;
+			low = (__u16)(1023 / ratio / adjacent) + 1;
+			high = (__u16)(65536 / ratio / adjacent) - 1;
 			remaining = (high - low) + 1;
 			
-			if (tcp_list.last_alloc != 0)
-				rover = tcp_list.last_alloc / ratio + 1;
-			else
-				rover = low;
+			if (tcp_list.last_alloc != 0) {
+				rover_j = tcp_list.last_alloc / ratio / adjacent;
+				rover_k = tcp_list.last_alloc % adjacent + 1;
+				if (rover_k == adjacent) {
+					rover_j++;
+					rover_k = 0;
+				}
+			} else {
+				rover_j = low;
+				rover_k = 0;
+			}
 			
 			do { 
-				retport = rover * ratio + offset;
+				retport = (rover_j * ratio + offset) * adjacent + rover_k;
 				if (!tcp_port_in_use(retport))
 					break;
 				
-				if (++rover > high)
-					rover = low;
-				
+				rover_k++;
+				if (rover_k == adjacent) {
+					rover_j++;
+					remaining--;
+					rover_k = 0;
+					if (rover_j > high)
+						rover_j = low;
+				}
 			} while (--remaining > 0);
 			
 			if (remaining <= 0) {
@@ -1152,7 +1164,7 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 	
 	if (retport == 0) // No existing map, generate new map
 	{
-    		__be16 rover;
+    		__be16 rover_j, rover_k;
 
 		if (ratio == 1) {
 			// We are in 1:1 mapping mode, use old port directly.
@@ -1161,23 +1173,35 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 			int remaining;
 			__be16 low, high;
 			
-			low = (__u16)(1023 / ratio) + 1;
-			high = (__u16)(65536 / ratio) - 1;
+			low = (__u16)(1023 / ratio / adjacent) + 1;
+			high = (__u16)(65536 / ratio / adjacent) - 1;
 			remaining = (high - low) + 1;
 			
-			if (tcp_list.last_alloc != 0)
-				rover = tcp_list.last_alloc / ratio + 1;
-			else
-				rover = low;
+			if (tcp_list.last_alloc != 0) {
+				rover_j = tcp_list.last_alloc / ratio / adjacent;
+				rover_k = tcp_list.last_alloc % adjacent + 1;
+				if (rover_k == adjacent) {
+					rover_j++;
+					rover_k = 0;
+				}
+			} else {
+				rover_j = low;
+				rover_k = 0;
+			}
 			
 			do { 
-				retport = rover * ratio + offset;
+				retport = (rover_j * ratio + offset) * adjacent + rover_k;
 				if (!tcp_port_in_use(retport))
 					break;
 				
-				if (++rover > high)
-					rover = low;
-				
+				rover_k++;
+				if (rover_k == adjacent) {
+					rover_j++;
+					remaining--;
+					rover_k = 0;
+					if (rover_j > high)
+						rover_j = low;
+				}
 			} while (--remaining > 0);
 			
 			if (remaining <= 0) {
