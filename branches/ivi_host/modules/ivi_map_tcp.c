@@ -543,8 +543,7 @@ static bool tcp_in_window(struct tcphdr *th, __u32 len, PACKET_DIR dir, PTCP_STA
 	return res;
 }
 
-
-FILTER_STATUS CreateTcpStateContext(struct tcphdr *th, __u32 len, PTCP_STATE_CONTEXT StateContext)
+static FILTER_STATUS CreateTcpStateContext(struct tcphdr *th, __u32 len, PTCP_STATE_CONTEXT StateContext)
 {
 	PTCP_STATE_INFO sender = &(StateContext->Seen[0]);   // Sender is always local
 	PTCP_STATE_INFO receiver = &(StateContext->Seen[1]); // Receiver is always remote
@@ -593,7 +592,7 @@ FILTER_STATUS CreateTcpStateContext(struct tcphdr *th, __u32 len, PTCP_STATE_CON
 }
 
 
-FILTER_STATUS UpdateTcpStateContext(struct tcphdr *th, __u32 len, PACKET_DIR dir, PTCP_STATE_CONTEXT StateContext)
+static FILTER_STATUS UpdateTcpStateContext(struct tcphdr *th, __u32 len, PACKET_DIR dir, PTCP_STATE_CONTEXT StateContext)
 {
 	PTCP_STATE_INFO sender = &(StateContext->Seen[dir]);
 	PTCP_STATE_INFO receiver = &(StateContext->Seen[!dir]);

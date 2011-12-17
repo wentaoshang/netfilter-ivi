@@ -25,4 +25,6 @@
 
 #define IVI_IOC_ADJACENT	_IOW(IVI_IOCTL, 0x20, int)
 
+#define IVI_IOC_ADD_RULE	_IOW(IVI_IOCTL, 0x21, int)
+
 #endif /* IVI_IOCTL_H */

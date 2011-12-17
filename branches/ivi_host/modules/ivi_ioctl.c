@@ -21,11 +21,14 @@
 #include "ivi_nf.h"
 #include "ivi_xmit.h"
 #include "ivi_ioctl.h"
+#include "ivi_rule.h"
+#include "ivi_rule6.h"
 #include "ivi_config.h"
 
 static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) {
 	int retval = 0;
 	__be16 tmp;
+	struct rule_info rule;
 	
 	switch (cmd) {
 		case IVI_IOC_START:
@@ -103,11 +106,8 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				suffix++;
 				tmp = tmp >> 1;
 			}
-			//printk("%04x\n", suffix);
 			suffix = suffix << 12;
-			//printk("%04x\n", suffix);
 			suffix += offset & 0x0fff;
-			//printk("%04x\n", suffix);
 			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", suffix);
 			addr_fmt = ADDR_FMT_SUFFIX;
 			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
@@ -134,6 +134,21 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				return -EACCES;
 			}
 			printk(KERN_INFO "ivi_ioctl: default pd prefix length set to %d.\n", v6defaultlen);
+			break;
+
+		case IVI_IOC_ADD_RULE:
+			if (copy_from_user(&rule, (void *)arg, sizeof(struct rule_info)) > 0) {
+				return -EACCES;
+			}
+			if (ivi_rule_insert(&rule) != 0) {
+				printk(KERN_DEBUG "ivi_ioctl: fail to insert " NIP4_FMT "/%d -> " NIP6_FMT "/%d\n", 
+						NIP4(rule.prefix4), rule.plen4, NIP6(rule.prefix6), rule.plen6);
+				return -EINVAL;
+			}
+			if (ivi_rule6_insert(&rule) != 0) {
+				printk(KERN_DEBUG "ivi_ioctl: fail to insert " NIP6_FMT " -> %d\n", NIP6(rule.prefix6), rule.plen6);
+				return -EINVAL;
+			}
 			break;
 		
 		default:
