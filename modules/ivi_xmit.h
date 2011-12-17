@@ -22,6 +22,8 @@
 #include <net/ndisc.h>
 #include <net/route.h>
 #include "ivi_config.h"
+#include "ivi_rule.h"
+#include "ivi_rule6.h"
 #include "ivi_map.h"
 #include "ivi_map_tcp.h"
 

@@ -13,6 +13,9 @@
 // comment this line out if you don't want to track any debug information of tcp connection state
 //#define IVI_DEBUG_TCP
 
+// comment this line out if you don't want to track any debug information of rule mapping
+#define IVI_DEBUG_RULE
+
 // comment this line out if you want to use linked lists for port mapping
 #define IVI_HASH
 

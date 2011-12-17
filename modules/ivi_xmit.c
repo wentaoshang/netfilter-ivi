@@ -11,12 +11,17 @@
  *	Wentao Shang	:	Add ICMP translation support.
  *	Wentao Shang	:	IPv6 prefix length is configurable now.
  *	Wentao Shang	:	Modified to host-based IVI. Remove NAT44 functionality.
+ *	Wentao Shang	:	Add rule lookup to address translation routine.
  */
 
 #include "ivi_xmit.h"
 
 static __inline int mc_v4_addr(const unsigned int *addr) {
 	return ((ntohl(*addr) & 0xe0000000) == 0xe0000000);
+}
+
+static __inline int link_local_addr(const struct in6_addr *addr) {
+	return ((addr->s6_addr32[0] & htonl(0xffc00000)) == htonl(0xfe800000));
 }
 	          
 static __inline int mc_v6_addr(const struct in6_addr *addr) {
@@ -30,7 +35,7 @@ EXPORT_SYMBOL(v4addr);
 __be32 v4mask = 0xffffff00;  // "/24" prefix length for the v4 address
 EXPORT_SYMBOL(v4mask);
 
-// v6 ivi prefix
+// v6 ivi prefix for the host
 __u8 v6prefix[16] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::" in network byte order
 EXPORT_SYMBOL(v6prefix);
 
@@ -47,7 +52,7 @@ EXPORT_SYMBOL(v6defaultlen);
 __u8 addr_fmt = 0;  // ivi translated address format
 EXPORT_SYMBOL(addr_fmt);
 
-__u16 mss_limit = 1340;  // max mss supported
+__u16 mss_limit = 1440;  // max mss supported
 EXPORT_SYMBOL(mss_limit);
 
 /*
@@ -67,7 +72,7 @@ static __inline int addr_is_v4host(const unsigned int *addr) {
 /*
  * Returns whether the v6 address belongs to the same network which the host's v4 network is mapped into.
  */
-int addr_in_v6network(const struct in6_addr *addr) {
+static int addr_in_v6network(const struct in6_addr *addr) {
 	__be32 embed = 0;
 	int i, ret = 1;
 	
@@ -93,7 +98,7 @@ int addr_in_v6network(const struct in6_addr *addr) {
 /*
  * Returns whether the v6 address is the host's mapped ivi address
  */
-int addr_is_v6host(const struct in6_addr *addr) {
+static int addr_is_v6host(const struct in6_addr *addr) {
 	__be32 embed = 0;
 	int i, ret = 1;
 	
@@ -116,29 +121,63 @@ int addr_is_v6host(const struct in6_addr *addr) {
 	return (embed == v4addr);
 }
 
-int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, __u8 *prefix, __be32 prefixlen, __u8 fmt) {
-	unsigned int addr = ntohl(*v4addr);
+static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _local) {
+	int prefixlen;
+	u32 addr = ntohl(*v4addr);
 	
 	memset(v6addr, 0, sizeof(struct in6_addr));
-	memcpy(v6addr->s6_addr, prefix, prefixlen);
+
+	if (_local) {
+		// Fast path for local address translation
+		prefixlen = v6prefixlen;
+		memcpy(v6addr, v6prefix, prefixlen);
+	} else {
+		if (ivi_rule_lookup(addr, v6addr, &prefixlen) != 0) {
+#ifdef IVI_DEBUG
+			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
+#endif
+			return -1;
+		}
+		prefixlen /= 8; /* counted in bytes */
+	}
+	
 	v6addr->s6_addr[prefixlen] = (unsigned char)(addr >> 24);
 	v6addr->s6_addr[prefixlen + 1] = (unsigned char)((addr >> 16) & 0xff);
 	v6addr->s6_addr[prefixlen + 2] = (unsigned char)((addr >> 8) & 0xff);
 	v6addr->s6_addr[prefixlen + 3] = (unsigned char)(addr & 0xff);
-	
-	if (fmt == ADDR_FMT_POSTFIX) {
-		v6addr->s6_addr16[6] = htons(ratio);
-		v6addr->s6_addr16[7] = htons(offset);
-	} else if (fmt == ADDR_FMT_SUFFIX) {
-		v6addr->s6_addr[prefixlen + 4] = (suffix >> 8) & 0xff;
-		v6addr->s6_addr[prefixlen + 5] = suffix & 0xff;
+
+	if (_local) {
+		if (addr_fmt == ADDR_FMT_POSTFIX) {
+			v6addr->s6_addr16[6] = htons(ratio);
+			v6addr->s6_addr16[7] = htons(offset);
+		} else if (addr_fmt == ADDR_FMT_SUFFIX) {
+			v6addr->s6_addr[prefixlen + 4] = (suffix >> 8) & 0xff;
+			v6addr->s6_addr[prefixlen + 5] = suffix & 0xff;
+		}
 	}
+	/* No suffix coding for remote address translation */
 	
-	return 0;  // This function always succeed.
+	return 0;
 }
 
-int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, __be32 prefixlen) {
-	__be32 addr = 0;
+static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u8 _local) {
+	u32 addr;
+	int prefixlen;
+
+	addr = 0;
+
+	if (_local) {
+		// Fast path for local address translation
+		prefixlen = v6prefixlen;
+	} else {
+		if (ivi_rule6_lookup(v6addr, &prefixlen) != 0) {
+#ifdef IVI_DEBUG
+			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
+#endif
+			return -1;
+		}
+		prefixlen /= 8; /* counted in bytes */
+	}
 	
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen]) << 24;
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 1]) << 16;
@@ -146,7 +185,7 @@ int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, __be32 prefixlen)
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 3]);
 	*v4addr = htonl(addr);
 	
-	return 0;  // This function always succeed.
+	return 0;
 }
 
 
@@ -183,7 +222,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	}
 
 	if (unlikely(addr_is_v4host(&(ip4h->daddr)))) {
-		// Do not translate ipv4 packets that are toward the host (which should not be possible.).
+		// Do not translate ipv4 packets that are toward the host (this should not happen).
 		printk(KERN_ERR "ivi_v4v6_xmit: by pass IPv4 packet heading toward the host.\n");
 		return -EINVAL;  // Just accept.
 	}
@@ -194,7 +233,6 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		return -EINVAL;  // Just accept.
 	}
 */
-
 	hlen = sizeof(struct ipv6hdr);
 	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
 	
@@ -256,13 +294,12 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	skb_reserve(newskb, LL_RESERVED_SPACE((skb_dst(skb))->dev));
 	
 	ip6h = (struct ipv6hdr *)skb_put(newskb, hlen);
-	if (unlikely(ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), v6prefix, v6prefixlen, addr_fmt) != 0)) {
+	if (ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), 1) != 0) {
 		kfree_skb(newskb);
 		return 0;
 	}
 
-	/* Do not append suffix for dst address translation */
-	if (unlikely(ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), v6default, v6defaultlen, ADDR_FMT_NONE) != 0)) {
+	if (ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), 0) != 0) {
 		kfree_skb(newskb);
 		return 0;
 	}
@@ -270,7 +307,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	*(__u32 *)ip6h = __constant_htonl(0x60000000);
 	ip6h->hop_limit = ip4h->ttl;
 	ip6h->payload_len = htons(plen);
-	ip6h->nexthdr = ip4h->protocol;  //XXX: Need to be xlated for ICMP protocol.
+	ip6h->nexthdr = ip4h->protocol;  /* Need to be xlated for ICMP protocol */
 	
 	payload = (__u8 *)skb_put(newskb, plen);
 	switch (ip6h->nexthdr) {
@@ -351,7 +388,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	int hlen, plen;
 	
 	eth6 = eth_hdr(skb);
-	if (eth6->h_proto == __constant_ntohs(ETH_P_IP)) {
+	if (unlikely(eth6->h_proto == __constant_ntohs(ETH_P_IP))) {
 		// This should not happen since we are hooked on PF_INET6.
 		printk(KERN_DEBUG "ivi_v6v4_xmit: IPv4 packet received on IPv6 hook.\n");
 		return -EINVAL;  // Just accept.
@@ -360,13 +397,13 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	ip6h = ipv6_hdr(skb);
 	if (mc_v6_addr(&(ip6h->daddr))) {
 		// By pass ipv6 multicast packet (for ND)
-		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 multicast packet, possibly ND packet.\n");
-		return -EINVAL;
+		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 multicast packet (possibly ND packet).\n");
+		return -EINVAL;  // Just accept.
 	}
 	
 	if (addr_is_v6host(&(ip6h->daddr)) == 0) {
 		// Do not translate packets that are not heading toward the v4 network.
-		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass packet that is not to the v4 host, routing system will handle them.\n");
+		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass packet that is not to the v4 host.\n");
 		return -EINVAL;  // Just accept.
 	}
 /*
@@ -376,6 +413,12 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 		return -EINVAL;  // Just accept.
 	}
 */
+	if (link_local_addr(&(ip6h->saddr))) {
+		// Do not translate ipv6 link local packets.
+		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass link local packet (possibly ND packet).\n");
+		return -EINVAL;  // Just accept.
+	}
+	
 	hlen = sizeof(struct iphdr);
 	plen = ntohs(ip6h->payload_len);
 	if (!(newskb = dev_alloc_skb(1600))) {
@@ -389,14 +432,14 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	memcpy(eth4, eth6, 12);
 	eth4->h_proto  = __constant_ntohs(ETH_P_IP);
 	ip4h = (struct iphdr *)skb_put(newskb, hlen);
-	if (unlikely(ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), v6defaultlen) != 0)) {
+	if (ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), 0) != 0) {
 		kfree_skb(newskb);
-		return 0;
+		return -EINVAL;  // Address translation failed, just accept.
 	}
 	
-	if (unlikely(ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), v6prefixlen) != 0)) {
+	if (ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), 1) != 0) {
 		kfree_skb(newskb);
-		return 0;
+		return -EINVAL;  // Address translation failed, just accept.
 	}
 	
 	*(__u16 *)ip4h = __constant_htons(0x4500);
@@ -404,7 +447,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	ip4h->id = 0;
 	ip4h->frag_off = 0;
 	ip4h->ttl = ip6h->hop_limit;
-	ip4h->protocol = ip6h->nexthdr;  //XXX: need to be xlated for ICMPv6 protocol
+	ip4h->protocol = ip6h->nexthdr;  /* Need to be xlated for ICMPv6 protocol */
 
 	payload = (__u8 *)skb_put(newskb, plen);
 	switch (ip4h->protocol) {

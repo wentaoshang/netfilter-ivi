@@ -77,7 +77,7 @@ static __inline int port_in_use(__be16 port, struct map_list *list)
 }
 
 // Add a new map, the pointer to the new map_tuple is returned on success, must be protected by spin lock when calling this function
-struct map_tuple* add_new_map(__be16 oldp, __be16 newp, struct map_list *list)
+static struct map_tuple* add_new_map(__be16 oldp, __be16 newp, struct map_list *list)
 {
 	struct map_tuple *map;
 	int hash;
@@ -331,7 +331,7 @@ static __inline int port_in_use(__be16 port, struct map_list *list)
 }
 
 // Add a new map, the pointer to the new map_tuple is returned on success, must be protected by spin lock when calling this function
-struct map_tuple* add_new_map(__be16 oldp, __be16 newp, struct map_list *list)
+static struct map_tuple* add_new_map(__be16 oldp, __be16 newp, struct map_list *list)
 {
 	struct map_tuple *map;
 	map = (struct map_tuple*)kmalloc(sizeof(struct map_tuple), GFP_ATOMIC);
