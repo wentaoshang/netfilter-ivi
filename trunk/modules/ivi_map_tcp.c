@@ -747,8 +747,8 @@ void refresh_tcp_map_list(void)
 				hlist_del(&iter->in_node);
 				tcp_list.size--;
 #ifdef IVI_DEBUG
-				printk(KERN_DEBUG "refresh_tcp_map_list: time out map %x:%d -> %d on out_chain[%d], TCP state %d\n", 
-						iter->oldaddr, iter->oldport, iter->newport, i, iter->Status);
+				printk(KERN_DEBUG "refresh_tcp_map_list: time out map " NIP4_FMT ":%d -> %d on out_chain[%d], TCP state %d\n", 
+						NIP4(iter->oldaddr), iter->oldport, iter->newport, i, iter->Status);
 #endif
 				kfree(iter);
 			}
@@ -774,8 +774,8 @@ void free_tcp_map_list(void)
 			hlist_del(&iter->in_node);
 			tcp_list.size--;
 #ifdef IVI_DEBUG
-			printk(KERN_DEBUG "free_tcp_map_list: delete map %x:%d -> %d on out_chain[%d], TCP state %d\n", 
-				iter->oldaddr, iter->oldport, iter->newport, i, iter->Status);
+			printk(KERN_DEBUG "free_tcp_map_list: delete map " NIP4_FMT ":%d -> %d on out_chain[%d], TCP state %d\n", 
+				NIP4(iter->oldaddr), iter->oldport, iter->newport, i, iter->Status);
 #endif
 			kfree(iter);
 		}
@@ -839,22 +839,22 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
                 		if (ftState == FILTER_ACCEPT) {
 					retport = StateContext->newport;
 #ifdef IVI_DEBUG
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map %x:%d -> %d on out_chain[%d], TCP state %d\n", StateContext->oldaddr, 
-						StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map " NIP4_FMT ":%d -> %d on out_chain[%d], TCP state %d\n", 
+						NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, hash, StateContext->Status);
 #endif
 				}
 				else if (ftState == FILTER_DROP) {
 					// Return -1 to drop current segment, keep the state info.
 #ifdef IVI_DEBUG
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map %x:%d -> %d on out_chain[%d], TCP state %d\n", StateContext->oldaddr, 
-						StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map " NIP4_FMT ":%d -> %d on out_chain[%d], TCP state %d\n", 
+						NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, hash, StateContext->Status);
 #endif
 				}
 				else  // FILTER_DROP_CLEAN
 				{
 #ifdef IVI_DEBUG
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map %x:%d -> %d on out_chain[%d], TCP state %d\n", StateContext->oldaddr, 
-						StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map " NIP4_FMT ":%d -> %d on out_chain[%d], TCP state %d\n", 
+						NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, hash, StateContext->Status);
 #endif
 					// Remove state info, return -1
                     			hlist_del(&StateContext->out_node);
@@ -911,7 +911,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&tcp_list.lock);
-				printk(KERN_INFO "get_outflow_tcp_map_port: failed to assign a new map port for %x:%d\n", oldaddr, oldp);
+				printk(KERN_INFO "get_outflow_tcp_map_port: failed to assign a new map port for " NIP4_FMT ":%d\n", NIP4(oldaddr), oldp);
 				return -1;
 			}
 		}
@@ -924,7 +924,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 		// No memory for state info. Fail this map.
 		spin_unlock_bh(&tcp_list.lock);
 #ifdef IVI_DEBUG
-			printk(KERN_DEBUG "get_outflow_tcp_map_port: kmalloc failed for map %x:%d\n", oldaddr, oldp);
+			printk(KERN_DEBUG "get_outflow_tcp_map_port: kmalloc failed for map " NIP4_FMT ":%d\n", NIP4(oldaddr), oldp);
 #endif
 			return -1;
 		}
@@ -936,7 +936,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 		if (ftState == FILTER_DROP_CLEAN) {
 			spin_unlock_bh(&tcp_list.lock);
 #ifdef IVI_DEBUG
-			printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on %x:%d, TCP state %d, fail to add new map.\n", oldaddr, 
+			printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on " NIP4_FMT ":%d, TCP state %d, fail to add new map.\n", NIP4(oldaddr), 
 				oldp, StateContext->Status);
 #endif
 			kfree(StateContext);
@@ -954,7 +954,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 		tcp_list.size++;
 		tcp_list.last_alloc = retport;
 #ifdef IVI_DEBUG
-		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map %x:%d -> %d added, TCP state %d\n", StateContext->oldaddr, 
+		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map " NIP4_FMT ":%d -> %d added, TCP state %d\n", NIP4(StateContext->oldaddr), 
 			StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 	}
@@ -1002,22 +1002,22 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be32 *o
 				*oldp = StateContext->oldport;
 				ret = 0;
 #ifdef IVI_DEBUG
-				printk("get_inflow_tcp_map_port: Found map %x:%d -> %d on in_chain[%d], TCP state %d\n", StateContext->oldaddr, 
-					StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+				printk("get_inflow_tcp_map_port: Found map " NIP4_FMT ":%d -> %d on in_chain[%d], TCP state %d\n", 
+					NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, hash, StateContext->Status);
 #endif
 			}
 			else if (ftState == FILTER_DROP) {
 				// Return -1 to drop current segment, keep the state info.
 #ifdef IVI_DEBUG
-				 printk("get_inflow_tcp_map_port: Invalid packet on map %x:%d -> %d on in_chain[%d], TCP state %d\n", StateContext->oldaddr, 
-				 	StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+				 printk("get_inflow_tcp_map_port: Invalid packet on map " NIP4_FMT ":%d -> %d on in_chain[%d], TCP state %d\n", 
+				 	NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, hash, StateContext->Status);
 #endif
 			}
 			else  // FILTER_DROP_CLEAN
 			{
 #ifdef IVI_DEBUG
-				printk("get_inflow_tcp_map_port: Invalid state on map %x:%d -> %d on in_chain[%d], TCP state %d\n", StateContext->oldaddr, 
-					StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+				printk("get_inflow_tcp_map_port: Invalid state on map " NIP4_FMT ":%d -> %d on in_chain[%d], TCP state %d\n", 
+					NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, hash, StateContext->Status);
 #endif
 				// Remove state info, return -1
 				hlist_del(&StateContext->out_node);
@@ -1063,7 +1063,7 @@ void refresh_tcp_map_list(void)
 			list_del(&iter->node);
 			tcp_list.size--;
 #ifdef IVI_DEBUG
-			printk(KERN_DEBUG "refresh_tcp_map_list: map %x:%d -> %d time out on TCP state %d\n", iter->oldaddr, iter->oldport, iter->newport, iter->Status);
+			printk(KERN_DEBUG "refresh_tcp_map_list: map " NIP4_FMT ":%d -> %d time out on TCP state %d\n", NIP4(iter->oldaddr), iter->oldport, iter->newport, iter->Status);
 #endif
 			kfree(iter);
 		}
@@ -1083,7 +1083,7 @@ void free_tcp_map_list(void)
 		list_del(&iter->node);
 		tcp_list.size--;
 #ifdef IVI_DEBUG
-		printk(KERN_DEBUG "free_tcp_map_list: map %x:%d -> %d deleted on TCP state %d\n", iter->oldaddr, iter->oldport, iter->newport, iter->Status);
+		printk(KERN_DEBUG "free_tcp_map_list: map " NIP4_FMT ":%d -> %d deleted on TCP state %d\n", NIP4(iter->oldaddr), iter->oldport, iter->newport, iter->Status);
 #endif
 		kfree(iter);
 	}
@@ -1140,22 +1140,22 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 				if (ftState == FILTER_ACCEPT) {
 					retport = StateContext->newport;
 #ifdef IVI_DEBUG
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map %x:%d -> %d, TCP state %d\n", StateContext->oldaddr, 
-						StateContext->oldport, StateContext->newport, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map " NIP4_FMT ":%d -> %d, TCP state %d\n", 
+						NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 				}
 				else if (ftState == FILTER_DROP) {
 		    			// Return -1 to drop current segment, keep the state info.
 #ifdef IVI_DEBUG
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map %x:%d -> %d, TCP state %d\n", StateContext->oldaddr, 
-						StateContext->oldport, StateContext->newport, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map " NIP4_FMT ":%d -> %d, TCP state %d\n", 
+						NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 				}
 				else  // FILTER_DROP_CLEAN
 				{
 #ifdef IVI_DEBUG
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map %x:%d -> %d, TCP state %d\n", StateContext->oldaddr, 
-						StateContext->oldport, StateContext->newport, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map " NIP4_FMT ":%d -> %d, TCP state %d\n", 
+						NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 					// Remove state info, return -1
                     			list_del(&StateContext->node);
@@ -1211,7 +1211,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&tcp_list.lock);
-				printk(KERN_INFO "get_outflow_tcp_map_port: failed to assign a new map port for %x:%d\n", oldaddr, oldp);
+				printk(KERN_INFO "get_outflow_tcp_map_port: failed to assign a new map port for " NIP4_FMT ":%d\n", NIP4(oldaddr), oldp);
 				return -1;
 			}
 		}
@@ -1223,7 +1223,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 		    	// No memory for state info. Fail this map.
 		    	spin_unlock_bh(&tcp_list.lock);
 #ifdef IVI_DEBUG
-            		printk(KERN_DEBUG "get_outflow_tcp_map_port: kmalloc failed for map %x:%d\n", oldaddr, oldp);
+            		printk(KERN_DEBUG "get_outflow_tcp_map_port: kmalloc failed for map " NIP4_FMT ":%d\n", NIP4(oldaddr), oldp);
 #endif
 			return -1;
 		}
@@ -1235,7 +1235,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 		if (ftState == FILTER_DROP_CLEAN) {
 			spin_unlock_bh(&tcp_list.lock);
 #ifdef IVI_DEBUG
-			printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on %x:%d, TCP state %d, fail to add new map.\n", oldaddr, 
+			printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on " NIP4_FMT ":%d, TCP state %d, fail to add new map.\n", NIP4(oldaddr), 
 				oldp, StateContext->Status);
 #endif
 			kfree(StateContext);
@@ -1250,7 +1250,7 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, struct tcphdr *th, __u
 		tcp_list.size++;
 		tcp_list.last_alloc = retport;
 #ifdef IVI_DEBUG
-		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map %x:%d -> %d added, TCP state %d\n", StateContext->oldaddr, 
+		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map " NIP4_FMT ":%d -> %d added, TCP state %d\n", NIP4(StateContext->oldaddr), 
 			StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 	}
@@ -1295,22 +1295,22 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be32 *o
 				*oldp = StateContext->oldport;
 				ret = 0;
 #ifdef IVI_DEBUG
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Found map %x:%d -> %d, TCP state %d\n", StateContext->oldaddr, 
-					StateContext->oldport, StateContext->newport, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Found map " NIP4_FMT ":%d -> %d, TCP state %d\n", 
+					NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 			}
 			else if (ftState == FILTER_DROP) {
 				// Return -1 to drop current segment, keep the state info.
 #ifdef IVI_DEBUG
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid packet on map %x:%d -> %d, TCP state %d\n", StateContext->oldaddr, 
-				 	StateContext->oldport, StateContext->newport, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid packet on map " NIP4_FMT ":%d -> %d, TCP state %d\n", 
+					NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 			}
 			else  // FILTER_DROP_CLEAN
 			{
 #ifdef IVI_DEBUG
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid state on map %x:%d -> %d, TCP state %d\n", StateContext->oldaddr, 
-					StateContext->oldport, StateContext->newport, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid state on map " NIP4_FMT ":%d -> %d, TCP state %d\n", 
+					NIP4(StateContext->oldaddr), StateContext->oldport, StateContext->newport, StateContext->Status);
 #endif
 				// Remove state info, return -1
 				list_del(&StateContext->node);

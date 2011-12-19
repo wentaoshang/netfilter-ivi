@@ -19,6 +19,29 @@
 #include <linux/spinlock.h>
 #include "ivi_config.h"
 
+#ifndef NIP4
+#define NIP4(addr) \
+	((unsigned char *)&addr)[3], \
+	((unsigned char *)&addr)[2], \
+	((unsigned char *)&addr)[1], \
+	((unsigned char *)&addr)[0]
+#define NIP4_FMT "%u.%u.%u.%u"
+#endif
+
+#ifndef NIP6
+#define NIP6(addr) \
+	ntohs((addr).s6_addr16[0]), \
+	ntohs((addr).s6_addr16[1]), \
+	ntohs((addr).s6_addr16[2]), \
+	ntohs((addr).s6_addr16[3]), \
+	ntohs((addr).s6_addr16[4]), \
+	ntohs((addr).s6_addr16[5]), \
+	ntohs((addr).s6_addr16[6]), \
+	ntohs((addr).s6_addr16[7])
+#define NIP6_FMT "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x"
+#endif
+
+
 /* map entry structure */
 struct map_tuple {
 #ifdef IVI_HASH
