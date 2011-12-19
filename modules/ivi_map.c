@@ -97,7 +97,7 @@ static struct map_tuple* add_new_map(__be16 oldp, __be16 newp, struct map_list *
 	hlist_add_head(&map->in_node, &list->in_chain[hash]);
 	list->size++;
 	list->last_alloc = newp;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 	printk(KERN_DEBUG "add_new_map: add new map %d -> %d\n", oldp, newp);
 #endif
 	return map;
@@ -124,7 +124,7 @@ void refresh_map_list(struct map_list *list)
 				hlist_del(&iter->out_node);
 				hlist_del(&iter->in_node);
 				list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "refresh_map_list: time out map %d -> %d on out_chain[%d]\n", iter->oldport, iter->newport, i);
 #endif
 				kfree(iter);
@@ -150,7 +150,7 @@ void free_map_list(struct map_list *list)
 			hlist_del(&iter->out_node);
 			hlist_del(&iter->in_node);
 			list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "free_map_list: delete map %d -> %d on out_chain[%d]\n", iter->oldport, iter->newport, i);
 #endif
 			kfree(iter);
@@ -176,7 +176,9 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 	
 	if (get_list_size(list) >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "get_outflow_map_port: map list full.\n");
+#endif
 		return -1;
 	}
 	
@@ -190,7 +192,7 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 			if (iter->oldport == oldp) {
 				retport = iter->newport;
 				do_gettimeofday(&iter->timer);
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "get_outflow_map_port: find map %d -> %d on out_chain[%d]\n", iter->oldport, iter->newport, hash);
 #endif
 				break;
@@ -277,7 +279,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 	hash = port_hashfn(newp);
 	if (hlist_empty(&list->in_chain[hash])) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "get_inflow_map_port: in_chain[%d] empty.\n", hash);
+#endif
 		return -1;
 	}
 
@@ -285,7 +289,7 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 		if (iter->newport == newp) {
 			*oldp = iter->oldport;
 			do_gettimeofday(&iter->timer);
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "get_inflow_map_port: find map %d -> %d on in_chain[%d]\n", iter->oldport, iter->newport, hash);
 #endif
 			ret = 0;
@@ -347,7 +351,7 @@ static struct map_tuple* add_new_map(__be16 oldp, __be16 newp, struct map_list *
 	list_add(&map->node, &list->chain);
 	list->size++;
 	list->last_alloc = newp;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 	printk(KERN_DEBUG "add_new_map: add new map %d -> %d\n", oldp, newp);
 #endif
 	return map;
@@ -368,7 +372,7 @@ void refresh_map_list(struct map_list *list)
 		if (delta >= list->timeout) {
 			list_del(&iter->node);
 			list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "refresh_map_list: time out map %d -> %d\n", iter->oldport, iter->newport);
 #endif
 			kfree(iter);
@@ -388,7 +392,7 @@ void free_map_list(struct map_list *list)
 	list_for_each_entry_safe(iter, temp, &list->chain, node) {
 		list_del(&iter->node);
 		list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "free_map_list: delete map %d -> %d\n", iter->oldport, iter->newport);
 #endif
 		kfree(iter);
@@ -424,7 +428,7 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 			if (iter->oldport == oldp) {
 				retport = iter->newport;
 				do_gettimeofday(&iter->timer);
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "get_outflow_map_port: find map %d -> %d\n", iter->oldport, iter->newport);
 #endif
 				break;
@@ -508,7 +512,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 	
 	if (list_empty(&list->chain)) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "get_inflow_map_port: map list empty.\n");
+#endif
 		return -1;
 	}
 
@@ -516,7 +522,7 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp)
 		if (iter->newport == newp) {
 			*oldp = iter->oldport;
 			do_gettimeofday(&iter->timer);
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "get_inflow_map_port: find map %d -> %d\n", iter->oldport, iter->newport);
 #endif
 			ret = 0;

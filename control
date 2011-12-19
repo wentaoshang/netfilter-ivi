@@ -6,7 +6,7 @@ if [ ! -f modules/ivi_map.ko ] ; then
 fi
 
 start() {
-	if ( lsmod | grep "ivi_map" ) ; then
+	if ( lsmod | grep "ivi_rule" ) ; then
 		echo "Error: modules exist, run 'control restart' instead."
 		exit 1
 	fi
@@ -33,7 +33,7 @@ start() {
 }
 
 stop() {
-	if ( lsmod | grep "ivi_map" ) ; then
+	if ( lsmod | grep "ivi_rule" ) ; then
 		echo "Stopping IVI modules: "
 		rmmod ivi_ioctl
 		echo "rmmod ivi_ioctl"

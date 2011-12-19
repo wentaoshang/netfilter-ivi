@@ -119,7 +119,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			}
 			printk(KERN_INFO "ivi_ioctl: mss limit set to %d.\n", mss_limit);
 			break;
-
+/*
 		case IVI_IOC_PD_DEFAULT:
 			if (copy_from_user(v6default, (__u8 *)arg, 16) > 0) {
 				return -EACCES;
@@ -135,7 +135,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			}
 			printk(KERN_INFO "ivi_ioctl: default pd prefix length set to %d.\n", v6defaultlen);
 			break;
-
+*/
 		case IVI_IOC_ADD_RULE:
 			if (copy_from_user(&rule, (void *)arg, sizeof(struct rule_info)) > 0) {
 				return -EACCES;
