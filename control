@@ -11,6 +11,10 @@ start() {
 		exit 1
 	fi
 	echo "Starting IVI modules: "
+	insmod modules/ivi_rule.ko
+	echo "insmod ivi_rule.ko"
+	insmod modules/ivi_rule6.ko
+	echo "insmod ivi_rule6.ko"
 	insmod modules/ivi_map.ko
 	echo "insmod ivi_map.ko"
 	insmod modules/ivi_map_tcp.ko
@@ -41,6 +45,10 @@ stop() {
 		echo "rmmod ivi_map_tcp"
 		rmmod ivi_map
 		echo "rmmod ivi_map"
+		rmmod ivi_rule6
+		echo "rmmod ivi_rule6"
+		rmmod ivi_rule
+		echo "rmmod ivi_rule"
 		rm /dev/ivi
 		echo "rm /dev/ivi"
 	else

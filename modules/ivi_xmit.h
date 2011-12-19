@@ -21,22 +21,22 @@
 #include <net/ndisc.h>
 #include <net/route.h>
 #include "ivi_config.h"
+#include "ivi_rule.h"
+#include "ivi_rule6.h"
 #include "ivi_map.h"
 #include "ivi_map_tcp.h"
 
 extern __be32 v4network;
 extern __be32 v4mask;
-extern __u8 use_nat44;
 extern __be32 v4publicaddr;
 extern __u8 v6prefix[16];
 extern __be32 v6prefixlen;
-extern __u8 v6default[16];
-extern __be32 v6defaultlen;
+//extern __u8 v6default[16];
+//extern __be32 v6defaultlen;
+
+extern __u8 ivi_mode;
 
 extern __u8 addr_fmt;
-#define ADDR_FMT_NONE       0   // 1:1 xlate format
-#define ADDR_FMT_POSTFIX    1   // 1:N old format, append ratio and offset at the end of the IPv6 address
-#define ADDR_FMT_SUFFIX     2   // 1:N new format, append compressed ratio and offset code at the tail of the embed IPv4 address
 
 extern __u16 mss_limit;
 

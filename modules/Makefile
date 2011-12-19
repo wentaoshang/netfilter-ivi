@@ -1,4 +1,4 @@
-obj-m		:=	ivi_map.o ivi_map_tcp.o ivi_ioctl.o ivi_nf.o ivi_xmit.o
+obj-m		:=	ivi_rule.o ivi_rule6.o ivi_map.o ivi_map_tcp.o ivi_ioctl.o ivi_nf.o ivi_xmit.o
 KERNELDIR	:=	/lib/modules/$(shell uname -r)/build
 PWD		:=	$(shell pwd)
 

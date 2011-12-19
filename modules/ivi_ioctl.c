@@ -21,12 +21,15 @@
 #include "ivi_nf.h"
 #include "ivi_xmit.h"
 #include "ivi_ioctl.h"
+#include "ivi_rule.h"
+#include "ivi_rule6.h"
 #include "ivi_config.h"
 
 static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) {
 	int retval = 0;
 	struct net_device *dev;
 	char temp[IVI_IOCTL_LEN];
+	struct rule_info rule;
 	__be16 tmp;
 	
 	switch (cmd) {
@@ -104,13 +107,13 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			break;
 		
 		case IVI_IOC_NAT:
-			use_nat44 = 1;
-			printk(KERN_INFO "ivi_ioctl: nat44 enabled.\n");
+			ivi_mode = IVI_MODE_HGW_NAT44;
+			printk(KERN_INFO "ivi_ioctl: ivi_mode set to hgw with nat44 enabled.\n");
 			break;
 		
 		case IVI_IOC_NONAT:
-			use_nat44 = 0;
-			printk(KERN_INFO "ivi_ioctl: nat44 disabled.\n");
+			ivi_mode = IVI_MODE_HGW;
+			printk(KERN_INFO "ivi_ioctl: ivi_mode set to hgw with nat44 disabled.\n");
 			break;
 
 		case IVI_IOC_ADJACENT:
@@ -149,11 +152,8 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				suffix++;
 				tmp = tmp >> 1;
 			}
-			printk("%04x\n", suffix);
 			suffix = suffix << 12;
-			printk("%04x\n", suffix);
 			suffix += offset & 0x0fff;
-			printk("%04x\n", suffix);
 			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", suffix);
 			addr_fmt = ADDR_FMT_SUFFIX;
 			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
@@ -165,7 +165,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			}
 			printk(KERN_INFO "ivi_ioctl: mss limit set to %d.\n", mss_limit);
 			break;
-		
+/*
 		case IVI_IOC_PD_DEFAULT:
 			if (copy_from_user(v6default, (__u8 *)arg, 16) > 0) {
 				return -EACCES;
@@ -180,6 +180,26 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				return -EACCES;
 			}
 			printk(KERN_INFO "ivi_ioctl: default pd prefix length set to %d.\n", v6defaultlen);
+			break;
+*/
+		case IVI_IOC_ADD_RULE:
+			if (copy_from_user(&rule, (void *)arg, sizeof(struct rule_info)) > 0) {
+				return -EACCES;
+			}
+			if (ivi_rule_insert(&rule) != 0) {
+				printk(KERN_DEBUG "ivi_ioctl: fail to insert " NIP4_FMT "/%d -> " NIP6_FMT "/%d\n", 
+						NIP4(rule.prefix4), rule.plen4, NIP6(rule.prefix6), rule.plen6);
+				return -EINVAL;
+			}
+			if (ivi_rule6_insert(&rule) != 0) {
+				printk(KERN_DEBUG "ivi_ioctl: fail to insert " NIP6_FMT " -> %d\n", NIP6(rule.prefix6), rule.plen6);
+				return -EINVAL;
+			}
+			break;
+
+		case IVI_IOC_CORE:
+			ivi_mode = IVI_MODE_CORE;
+			printk(KERN_INFO "ivi_ioctl: ivi_mode set to stateless core.\n");
 			break;
 		
 		default:
