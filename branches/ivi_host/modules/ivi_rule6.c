@@ -11,7 +11,8 @@ struct rule6_node {
 	struct rule6_node *left;
 	struct rule6_node *right;
 	struct in6_addr key;
-	int bit_pos;
+	int bit_pos;  // plen6 + plen4
+	int plen6;  // actuall ipv6 prefix length
 	u8 flag;
 };
 
@@ -70,7 +71,7 @@ static __inline__ void node_free(struct rule6_node *n)
  * Rule insertion
  */
 
-static struct rule6_node* radix_insert_node(const struct in6_addr *addr, int plen)
+static struct rule6_node* radix_insert_node(const struct in6_addr *addr, int plen, int plen6)
 {
 	struct rule6_node *fn, *in, *ln, *pn;
 	int bit;
@@ -117,6 +118,7 @@ root_empty:
 	/* set new leaf's key */
 	ipv6_addr_copy(&ln->key, addr);
 	ln->bit_pos = plen;
+	ln->plen6 = plen6;
 	ln->parent = pn;
 	ln->flag |= RN_RINFO;
 
@@ -188,6 +190,7 @@ insert_above:
 		/* set new leaf's key */
 		ipv6_addr_copy(&ln->key, addr);
 		ln->bit_pos = plen;
+		ln->plen6 = plen6;
 		ln->parent = in;
 		ln->flag |= RN_RINFO;
 
@@ -215,6 +218,7 @@ insert_above:
 		/* set new leaf's key */
 		ipv6_addr_copy(&ln->key, addr);
 		ln->bit_pos = plen;
+		ln->plen6 = plen6;
 		ln->parent = pn;
 		ln->flag |= RN_RINFO;
 
@@ -242,19 +246,28 @@ int ivi_rule6_insert(struct rule_info *rule)
 {
 	int ret;
 
-	if (rule->plen6 > 128)
+	if ((rule->plen6 > 128) || (rule->plen6 % 8))
 		return -1;
 
+	if (rule->plen4 > 0) {
+		/* concatenate ipv6 prefix and ipv4 prefix */
+		/* overwrite on 'rule' memory */
+		rule->prefix6.s6_addr[rule->plen6 >> 3] = (unsigned char)(rule->prefix4 >> 24);
+		rule->prefix6.s6_addr[(rule->plen6 >> 3) + 1] = (unsigned char)((rule->prefix4 >> 16) & 0xff);
+		rule->prefix6.s6_addr[(rule->plen6 >> 3) + 2] = (unsigned char)((rule->prefix4 >> 8) & 0xff);
+		rule->prefix6.s6_addr[(rule->plen6 >> 3) + 3] = (unsigned char)(rule->prefix4 & 0xff);
+	}
+
 	spin_lock_bh(&radix_lock);
-	if (radix_insert_node(&rule->prefix6, rule->plen6) == NULL) {
+	if (radix_insert_node(&rule->prefix6, rule->plen6 + rule->plen4, rule->plen6) == NULL) {
 		ret = -1;
 #ifdef IVI_DEBUG_RULE
-		printk(KERN_DEBUG "ivi_rule6_insert: failed to insert entry " NIP6_FMT "/%d\n", NIP6(rule->prefix6), rule->plen6);
+		printk(KERN_DEBUG "ivi_rule6_insert: failed to insert entry " NIP6_FMT "/%d\n", NIP6(rule->prefix6), rule->plen6 + rule->plen4);
 #endif
 	} else {
 		ret = 0;
 #ifdef IVI_DEBUG_RULE
-		printk(KERN_DEBUG "ivi_rule6_insert: " NIP6_FMT "/%d\n", NIP6(rule->prefix6), rule->plen6);
+		printk(KERN_DEBUG "ivi_rule6_insert: " NIP6_FMT "/%d\n", NIP6(rule->prefix6), rule->plen6 + rule->plen4);
 #endif
 	}
 	spin_unlock_bh(&radix_lock);
@@ -320,7 +333,7 @@ int ivi_rule6_lookup(struct in6_addr *addr, int *plen)
 #ifdef IVI_DEBUG_RULE
 		printk(KERN_DEBUG "ivi_rule6_lookup: " NIP6_FMT " -> %d\n", NIP6(n->key), n->bit_pos);
 #endif
-		*plen = n->bit_pos;
+		*plen = n->plen6;
 		ret = 0;
 	}
 	
@@ -468,6 +481,16 @@ int ivi_rule6_delete(struct rule_info *rule)
 	int ret;
 
 	ret = -1;
+
+	if (rule->plen4 > 0) {
+		/* concatenate ipv6 prefix and ipv4 prefix */
+		/* overwrite on 'rule' memory */
+		rule->prefix6.s6_addr[rule->plen6 >> 3] = (unsigned char)(rule->prefix4 >> 24);
+		rule->prefix6.s6_addr[(rule->plen6 >> 3) + 1] = (unsigned char)((rule->prefix4 >> 16) & 0xff);
+		rule->prefix6.s6_addr[(rule->plen6 >> 3) + 2] = (unsigned char)((rule->prefix4 >> 8) & 0xff);
+		rule->prefix6.s6_addr[(rule->plen6 >> 3) + 3] = (unsigned char)(rule->prefix4 & 0xff);
+	}
+	
 	spin_lock_bh(&radix_lock);
 
 	if (unlikely(!radix)) {
@@ -491,11 +514,12 @@ int ivi_rule6_delete(struct rule_info *rule)
 
 		fn = next;
 	}
-
+	
 	/* Exact match? */
 	if ((fn->flag & RN_RINFO) 
-	    && ipv6_prefix_equal(&fn->key, &rule->prefix6, rule->plen6) 
-	    && (fn->bit_pos == rule->plen6)) {
+	    && (fn->bit_pos == rule->plen6 + rule->plen4)
+	    && (fn->plen6 == rule->plen6)
+	    && ipv6_prefix_equal(&fn->key, &rule->prefix6, fn->bit_pos)) {
 		if (radix_delete_trim(fn) != NULL) {
 			ret = 0;
 #ifdef IVI_DEBUG_RULE
