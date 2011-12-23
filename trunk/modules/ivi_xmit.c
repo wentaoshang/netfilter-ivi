@@ -18,19 +18,19 @@
 
 static struct net_device *v4dev, *v6dev;
 
-static __inline int mc_v4_addr(const unsigned int *addr) {
-	return ((ntohl(*addr) & 0xe0000000) == 0xe0000000);
-}
-
-static __inline int link_local_addr(const struct in6_addr *addr) {
+static inline int link_local_addr(const struct in6_addr *addr) {
 	return ((addr->s6_addr32[0] & htonl(0xffc00000)) == htonl(0xfe800000));
 }
 
-static __inline int mc_v6_addr(const struct in6_addr *addr) {
+static inline int mc_v6_addr(const struct in6_addr *addr) {
 	return (addr->s6_addr[0] == 0xff);
 }
 
-__u8 ivi_mode = 0;  // working mode for IVI translation
+static inline int addr_in_v4network(const unsigned int *addr) {
+	return ((ntohl(*addr) & v4mask) == v4network);
+}
+
+u8 ivi_mode = 0;  // working mode for IVI translation
 EXPORT_SYMBOL(ivi_mode);
 
 /*
@@ -55,45 +55,49 @@ EXPORT_SYMBOL(v6prefix);
 __be32 v6prefixlen = 8;  // "/64" prefix length in bytes (8)
 EXPORT_SYMBOL(v6prefixlen);
 
-__u8 addr_fmt = 0;  // ivi translated address format
-EXPORT_SYMBOL(addr_fmt);
+u8 hgw_fmt = 0;  // ivi translated address format
+EXPORT_SYMBOL(hgw_fmt);
 
-/*
-// default v6 prefix where the ipv4 dest addr is mapped into.
-__u8 v6default[16] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::" in network byte order
-EXPORT_SYMBOL(v6default);
 
-__be32 v6defaultlen = 8;  // "/64" prefix length in bytes (8)
-EXPORT_SYMBOL(v6defaultlen);
-*/
-
-__u16 mss_limit = 1440;  // max mss supported
+u16 mss_limit = 1440;  // max mss supported
 EXPORT_SYMBOL(mss_limit);
 
 
 #define ADDR_DIR_SRC 0
 #define ADDR_DIR_DST 1
 
-static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _dir) {
+static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, u8 _dir) {
 	int prefixlen;
-	u8 fmt;
 	u32 addr;
+	u16 ratio, adjacent, offset, suffix;
+	u8 fmt;
 
 	addr = ntohl(*v4addr);
+	ratio = adjacent = offset = suffix = fmt = 0;
 
 	memset(v6addr, 0, sizeof(struct in6_addr));
 
 	if ((ivi_mode >= IVI_MODE_HGW) && (_dir == ADDR_DIR_SRC)) {
-		// Fast path for local address translation in hgw mode
+		// Fast path for local address translation in hgw mode, use global parameters
 		prefixlen = v6prefixlen;
-		fmt = addr_fmt;
+		fmt = hgw_fmt;
 		memcpy(v6addr, v6prefix, prefixlen);
+		ratio = hgw_ratio;
+		offset = hgw_offset;
+		suffix = hgw_suffix;
 	} else {
-		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &fmt) != 0) {
+		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &ratio, &adjacent, &fmt) != 0) {
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
+		if (fmt != ADDR_FMT_NONE) {
+			offset = (port / ratio) % adjacent;
+			
+		}
+		suffix = fls(ratio) - 1;
+		suffix = suffix << 12;
+		suffix += offset & 0x0fff;
 	}
 
 	v6addr->s6_addr[prefixlen] = (unsigned char)(addr >> 24);
@@ -112,7 +116,7 @@ static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _dir) {
 	return 0;
 }
 
-static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *_ratio, u16 *_offset, u8 _dir) {
+static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio, u16 *adjacent, u16 *offset, u8 _dir) {
 	u32 addr;
 	int prefixlen;
 	u8 fmt;
@@ -132,7 +136,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *_rati
 		// Fast path for local address translation in hgw mode
 		prefixlen = v6prefixlen;
 	} else {
-		if (ivi_rule6_lookup(v6addr, &prefixlen, &fmt) != 0) {
+		if (ivi_rule6_lookup(v6addr, &prefixlen, ratio, adjacent, &fmt) != 0) {
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
 			return -1;
 		}
@@ -145,16 +149,15 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *_rati
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 3]);
 	*v4addr = htonl(addr);
 
-	if ((ivi_mode == IVI_MODE_CORE) && (_ratio != NULL) && (_offset != NULL)) {
+	if ((ivi_mode == IVI_MODE_CORE) && (ratio != NULL) && (offset != NULL)) {
+		/* offset is obtained from ipv6 address */
 		if (fmt == ADDR_FMT_POSTFIX) {
-			*_ratio = ntohs(v6addr->s6_addr16[6]);
-			*_offset = ntohs(v6addr->s6_addr16[7]);
+			*offset = ntohs(v6addr->s6_addr16[7]);
 		} else if (fmt == ADDR_FMT_SUFFIX) {
-			*_ratio = 1 << ((v6addr->s6_addr[prefixlen + 4] >> 4) & 0xf);
-			*_offset = ((v6addr->s6_addr[prefixlen + 4] << 8) + v6addr->s6_addr[prefixlen + 5]) & 0x0fff;
+			*offset = ((v6addr->s6_addr[prefixlen + 4] << 8) + v6addr->s6_addr[prefixlen + 5]) & 0x0fff;
 		} else {
-			*_ratio = 1;  // No port multiplex
-			*_offset = 0;
+			// No port multiplex
+			*offset = 0;
 		}
 	}
 
@@ -172,19 +175,26 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	struct icmp6hdr *icmp6h;
 	__u8 *payload;
 	unsigned int hlen, plen;
+	u16 newp, s_port, d_port;
 
 	eth4 = eth_hdr(skb);
-	if (unlikely(eth4->h_proto == __constant_ntohs(ETH_P_IPV6))) {
+	if (unlikely(eth4->h_proto != __constant_ntohs(ETH_P_IP))) {
 		// This should not happen since we are hooked on PF_INET.
-		printk(KERN_ERR "ivi_v4v6_xmit: IPv6 packet received on IPv4 hook.\n");
+		printk(KERN_ERR "ivi_v4v6_xmit: non-IPv4 packet received on IPv4 hook.\n");
 		return -EINVAL;  // Just accept.
 	}
 
 	ip4h = ip_hdr(skb);
-	if (mc_v4_addr(&(ip4h->daddr))) {
+	if (ipv4_is_multicast(ip4h->daddr) || ipv4_is_lbcast(ip4h->daddr) || ipv4_is_loopback(ip4h->daddr)) {
 		// By pass multicast packet
-		//printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 multicast packet.\n");
-		return -EINVAL;
+		printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 multicast/broadcast/loopback dest address.\n");
+		return -EINVAL;  // Just accept.
+	}
+
+	if (ivi_mode >= IVI_MODE_HGW && addr_in_v4network(&(ip4h->daddr))) {
+		// Do not translate ipv4 packets (hair pin) that are toward v4network.
+		printk(KERN_ERR "ivi_v4v6_xmit: IPv4 packet toward the v4 network bypassed in HGW mode.\n");
+		return -EINVAL;  // Just accept.
 	}
 
 	if (ip4h->ttl <= 1) {
@@ -198,16 +208,15 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 
 	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
 	payload = (__u8 *)(ip4h) + (ip4h->ihl << 2);
+	s_port = d_port = newp = 0;
 
-	if (ivi_mode >= IVI_MODE_HGW) {
-		__be16 newp;
+	switch (ip4h->protocol) {
+		case IPPROTO_TCP:
+			tcph = (struct tcphdr *)payload;
 
-		switch (ip4h->protocol) {
-			case IPPROTO_TCP:
-				tcph = (struct tcphdr *)payload;
-
-				if (get_outflow_tcp_map_port(ntohl(ip4h->saddr), ntohs(tcph->source), tcph, plen, &newp) == -1) {
-					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (TCP).\n", ntohl(ip4h->saddr), ntohs(tcph->source));
+			if (ivi_mode >= IVI_MODE_HGW) {
+				if (get_outflow_tcp_map_port(ntohl(ip4h->saddr), ntohs(tcph->source), hgw_ratio, hgw_adjacent, hgw_offset, tcph, plen, &newp) == -1) {
+					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for " NIPQUAD_FMT ":%d (TCP).\n", NIPQUAD(ip4h->saddr), ntohs(tcph->source));
 					// Just let the packet pass with original address.
 				} else {
 					if (ivi_mode == IVI_MODE_HGW_NAT44) {
@@ -216,14 +225,18 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					}
 					tcph->source = htons(newp);
 				}
+			}
+			s_port = ntohs(tcph->source);
+			d_port = ntohs(tcph->dest);
 
-				break;
+			break;
 
-			case IPPROTO_UDP:
-				udph = (struct udphdr *)payload;
+		case IPPROTO_UDP:
+			udph = (struct udphdr *)payload;
 
-				if (get_outflow_map_port(ntohl(ip4h->saddr), ntohs(udph->source), &udp_list, &newp) == -1) {
-					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (UDP).\n", ntohl(ip4h->saddr), ntohs(udph->source));
+			if (ivi_mode >= IVI_MODE_HGW) {
+				if (get_outflow_map_port(&udp_list, ntohl(ip4h->saddr), ntohs(udph->source), hgw_ratio, hgw_adjacent, hgw_offset, &newp) == -1) {
+					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for " NIPQUAD_FMT ":%d (UDP).\n", NIPQUAD(ip4h->saddr), ntohs(udph->source));
 					// Just let the packet pass with original address.
 				} else {
 					if (ivi_mode == IVI_MODE_HGW_NAT44) {
@@ -232,15 +245,19 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					}
 					udph->source = htons(newp);
 				}
+			}
+			s_port = ntohs(udph->source);
+			d_port = ntohs(udph->dest);
 
-				break;
+			break;
 
-			case IPPROTO_ICMP:
-				icmph = (struct icmphdr *)payload;
+		case IPPROTO_ICMP:
+			icmph = (struct icmphdr *)payload;
 
-				if (icmph->type == ICMP_ECHO || icmph->type == ICMP_ECHOREPLY) {
-					if (get_outflow_map_port(ntohl(ip4h->saddr), ntohs(icmph->un.echo.id), &icmp_list, &newp) == -1) {
-						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for %x:%d (ICMP).\n", ntohl(ip4h->saddr), ntohs(icmph->un.echo.id));
+			if (icmph->type == ICMP_ECHO || icmph->type == ICMP_ECHOREPLY) {
+				if (ivi_mode >= IVI_MODE_HGW) {
+					if (get_outflow_map_port(&icmp_list, ntohl(ip4h->saddr), ntohs(icmph->un.echo.id), hgw_ratio, hgw_adjacent, hgw_offset, &newp) == -1) {
+						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for " NIPQUAD_FMT ":%d (ICMP).\n", NIPQUAD(ip4h->saddr), ntohs(icmph->un.echo.id));
 						// Just let the packet pass with original address.
 					} else {
 						if (ivi_mode == IVI_MODE_HGW_NAT44) {
@@ -249,17 +266,18 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 						}
 						icmph->un.echo.id = htons(newp);
 					}
-				} else {
-					printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type in NAT44. Drop packet now.\n");
-					return 0;
 				}
+				s_port = d_port = ntohs(icmph->un.echo.id);
+			} else {
+				printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type in NAT44. Drop packet now.\n");
+				return 0;
+			}
 
-				break;
+			break;
 
-			default:
-				printk(KERN_ERR "ivi_v4v6_xmit: unsupported protocol %d for nat44 operation.\n", ip4h->protocol);
-				// Just let the packet pass with original address.
-		}
+		default:
+			printk(KERN_ERR "ivi_v4v6_xmit: unsupported protocol %d for nat44 operation.\n", ip4h->protocol);
+			// Just let the packet pass with original address.
 	}
 
 	hlen = sizeof(struct ipv6hdr);
@@ -275,14 +293,14 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	eth6->h_proto  = __constant_ntohs(ETH_P_IPV6);
 
 	ip6h = (struct ipv6hdr *)skb_put(newskb, hlen);
-	if (ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), ADDR_DIR_SRC) != 0) {
+	if (ipaddr_4to6(&(ip4h->saddr), s_port, &(ip6h->saddr), ADDR_DIR_SRC) != 0) {
 		kfree_skb(newskb);
-		return 0;
+		return -EINVAL;  // Just accept.
 	}
 
-	if (ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), ADDR_DIR_DST) != 0) {
+	if (ipaddr_4to6(&(ip4h->daddr), d_port, &(ip6h->daddr), ADDR_DIR_DST) != 0) {
 		kfree_skb(newskb);
-		return 0;
+		return -EINVAL;  // Just accept.
 	}
 
 	*(__u32 *)ip6h = __constant_htonl(0x60000000);
@@ -349,7 +367,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 EXPORT_SYMBOL(ivi_v4v6_xmit);
 
 
-static __inline bool port_in_range(u16 _port, u16 _ratio, u16 _adjacent, u16 _offset)
+static inline bool port_in_range(u16 _port, u16 _ratio, u16 _adjacent, u16 _offset)
 {
 	if (_ratio == 1)
 		return true;
@@ -367,12 +385,12 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	struct icmphdr *icmph;
 	__u8 *payload;
 	unsigned int hlen, plen;
-	u16 s_ratio, s_offset, d_ratio, d_offset;  // Used in core mode
+	u16 s_ratio, s_adj, s_offset, d_ratio, d_adj, d_offset;  // Used in core mode
 
 	eth6 = eth_hdr(skb);
-	if (unlikely(eth6->h_proto == __constant_ntohs(ETH_P_IP))) {
+	if (unlikely(eth6->h_proto != __constant_ntohs(ETH_P_IPV6))) {
 		// This should not happen since we are hooked on PF_INET6.
-		printk(KERN_ERR "ivi_v6v4_xmit: IPv4 packet received on IPv6 hook.\n");
+		printk(KERN_ERR "ivi_v6v4_xmit: non-IPv6 packet received on IPv6 hook.\n");
 		return -EINVAL;  // Just accept.
 	}
 
@@ -405,12 +423,12 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	memcpy(eth4, eth6, 12);
 	eth4->h_proto  = __constant_ntohs(ETH_P_IP);
 	ip4h = (struct iphdr *)skb_put(newskb, hlen);
-	if (ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), &s_ratio, &s_offset, ADDR_DIR_SRC) != 0) {
+	if (ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), &s_ratio, &s_adj, &s_offset, ADDR_DIR_SRC) != 0) {
 		kfree_skb(newskb);
 		return -EINVAL;  // Just accept.
 	}
 
-	if (ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), &d_ratio, &d_offset, ADDR_DIR_DST) != 0) {
+	if (ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), &d_ratio, &d_adj, &d_offset, ADDR_DIR_DST) != 0) {
 		kfree_skb(newskb);
 		return -EINVAL;  // Just accept.
 	}
@@ -433,21 +451,29 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				__be16 oldp;
 				
 				if (get_inflow_tcp_map_port(ntohs(tcph->dest), tcph, plen, &oldaddr, &oldp) == -1) {
-					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (TCP).\n", ntohs(tcph->dest));
+					//printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (TCP).\n", ntohs(tcph->dest));
+					kfree_skb(newskb);
+					return 0;
 				} else {
 					// DNAT-PT
 					ip4h->daddr = htonl(oldaddr);
 					tcph->dest = htons(oldp);
 				}
 			} else if (ivi_mode == IVI_MODE_CORE) {
-				if (!port_in_range(ntohs(tcph->source), s_ratio, adjacent, s_offset)) {
-					printk(KERN_INFO "ivi_v6v4_xmit: TCP src port is not in range. Drop packet.\n");
+				if (!port_in_range(ntohs(tcph->source), s_ratio, s_adj, s_offset)) {
+#ifdef IVI_DEBUG
+					printk(KERN_INFO "ivi_v6v4_xmit: TCP src port %d is not in range  (r=%d, m=%d, o=%d). Drop packet.\n", 
+						ntohs(tcph->source), s_ratio, s_adj, s_offset);
+#endif
 					kfree_skb(newskb);
 					return 0;
 				}
 				
-				if (!port_in_range(ntohs(tcph->dest), d_ratio, adjacent, d_offset)) {
-					printk(KERN_INFO "ivi_v6v4_xmit: TCP dst port is not in range. Drop packet.\n");
+				if (!port_in_range(ntohs(tcph->dest), d_ratio, d_adj, d_offset)) {
+#ifdef IVI_DEBUG
+					printk(KERN_INFO "ivi_v6v4_xmit: TCP dst port %d is not in range  (r=%d, m=%d, o=%d). Drop packet.\n", 
+						ntohs(tcph->dest), d_ratio, d_adj, d_offset);
+#endif
 					kfree_skb(newskb);
 					return 0;
 				}
@@ -465,22 +491,30 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				__be32 oldaddr;
 				__be16 oldp;
 
-				if (get_inflow_map_port(ntohs(udph->dest), &udp_list, &oldaddr, &oldp) == -1) {
-					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (UDP).\n", ntohs(udph->dest));
+				if (get_inflow_map_port(&udp_list,  ntohs(udph->dest), &oldaddr, &oldp) == -1) {
+					//printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (UDP).\n", ntohs(udph->dest));
+					kfree_skb(newskb);
+					return 0;
 				} else {
 					// DNAT-PT
 					ip4h->daddr = htonl(oldaddr);
 					udph->dest = htons(oldp);
 				}
 			} else if (ivi_mode == IVI_MODE_CORE) {
-				if (!port_in_range(ntohs(udph->source), s_ratio, adjacent, s_offset)) {
-					printk(KERN_INFO "ivi_v6v4_xmit: UDP src port is not in range. Drop packet.\n");
+				if (!port_in_range(ntohs(udph->source), s_ratio, s_adj, s_offset)) {
+#ifdef IVI_DEBUG
+					printk(KERN_INFO "ivi_v6v4_xmit: UDP src port %d is not in range (r=%d, m=%d, o=%d). Drop packet.\n", 
+						ntohs(udph->source), s_ratio, s_adj, s_offset);
+#endif
 					kfree_skb(newskb);
 					return 0;
 				}
 				
-				if (!port_in_range(ntohs(udph->dest), d_ratio, adjacent, d_offset)) {
-					printk(KERN_INFO "ivi_v6v4_xmit: UDP dst port is not in range. Drop packet.\n");
+				if (!port_in_range(ntohs(udph->dest), d_ratio, d_adj, d_offset)) {
+#ifdef IVI_DEBUG
+					printk(KERN_INFO "ivi_v6v4_xmit: UDP dst port %d is not in range (r=%d, m=%d, o=%d). Drop packet.\n", 
+						ntohs(udph->dest), d_ratio, d_adj, d_offset);
+#endif
 					kfree_skb(newskb);
 					return 0;
 				}
@@ -502,12 +536,23 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 					__be32 oldaddr;
 					__be16 oldp;
 
-					if (get_inflow_map_port(ntohs(icmph->un.echo.id), &icmp_list, &oldaddr, &oldp) == -1) {
-						printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (ICMP).\n", ntohs(icmph->un.echo.id));
+					if (get_inflow_map_port(&icmp_list, ntohs(icmph->un.echo.id), &oldaddr, &oldp) == -1) {
+						//printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (ICMP).\n", ntohs(icmph->un.echo.id));
+						kfree_skb(newskb);
+						return 0;
 					} else {
 						// DNAT-PT
 						ip4h->daddr = htonl(oldaddr);
 						icmph->un.echo.id = htons(oldp);
+					}
+				}  else if (ivi_mode == IVI_MODE_CORE) {
+					if (!port_in_range(ntohs(icmph->un.echo.id), s_ratio, s_adj, s_offset)) {
+#ifdef IVI_DEBUG
+						printk(KERN_INFO "ivi_v6v4_xmit: ICMP id %d is not in src range (r=%d, m=%d, o=%d). Drop packet.\n", 
+							ntohs(icmph->un.echo.id), s_ratio, s_adj, s_offset);
+#endif
+						kfree_skb(newskb);
+						return 0;
 					}
 				}
 

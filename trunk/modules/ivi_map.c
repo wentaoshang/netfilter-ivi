@@ -19,17 +19,17 @@ EXPORT_SYMBOL(icmp_list);
 
 
 /* ratio and offset together indicate the port pool range */
-__be16 ratio = 1;
-EXPORT_SYMBOL(ratio);
+u16 hgw_ratio = 1;
+EXPORT_SYMBOL(hgw_ratio);
 
-__be16 offset = 0;
-EXPORT_SYMBOL(offset);
+u16 hgw_offset = 0;
+EXPORT_SYMBOL(hgw_offset);
 
-__be16 suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
-EXPORT_SYMBOL(suffix);
+u16 hgw_suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
+EXPORT_SYMBOL(hgw_suffix);
 
-__be16 adjacent = 1;
-EXPORT_SYMBOL(adjacent);
+u16 hgw_adjacent = 1;
+EXPORT_SYMBOL(hgw_adjacent);
 
 /* list operations */
 
@@ -99,7 +99,7 @@ struct map_tuple* add_new_map(__be32 oldaddr, __be16 oldp, __be16 newp, struct m
 	hlist_add_head(&map->in_node, &list->in_chain[hash]);
 	list->size++;
 	list->last_alloc = newp;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 	printk(KERN_DEBUG "add_new_map: add new map " NIP4_FMT ":%d -> %d\n", NIP4(oldaddr), oldp, newp);
 #endif
 	return map;
@@ -126,7 +126,7 @@ void refresh_map_list(struct map_list *list)
 				hlist_del(&iter->out_node);
 				hlist_del(&iter->in_node);
 				list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "refresh_map_list: time out map " NIP4_FMT ":%d -> %d on out_chain[%d]\n", NIP4(iter->oldaddr), iter->oldport, iter->newport, i);
 #endif
 				kfree(iter);
@@ -152,7 +152,7 @@ void free_map_list(struct map_list *list)
 			hlist_del(&iter->out_node);
 			hlist_del(&iter->in_node);
 			list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "free_map_list: delete map " NIP4_FMT ":%d -> %d on out_chain[%d]\n", NIP4(iter->oldaddr), iter->oldport, iter->newport, i);
 #endif
 			kfree(iter);
@@ -165,7 +165,7 @@ EXPORT_SYMBOL(free_map_list);
 /* mapping operations */
 
 // Get mapped port for outflow packet, input and output are in host byte order, return -1 if failed
-int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp)
+int get_outflow_map_port(struct map_list *list, __be32 oldaddr, __be16 oldp, u16 ratio, u16 adjacent, u16 offset, __be16 *newp)
 {
 	__be16 retport;
 	int hash;
@@ -178,7 +178,9 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 	
 	if (get_list_size(list) >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "get_outflow_map_port: map list full.\n");
+#endif
 		return -1;
 	}
 	
@@ -192,7 +194,7 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 			if (iter->oldport == oldp && iter->oldaddr == oldaddr) {
 				retport = iter->newport;
 				do_gettimeofday(&iter->timer);
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "get_outflow_map_port: find map " NIP4_FMT ":%d -> %d on out_chain[%d]\n", NIP4(iter->oldaddr), iter->oldport, iter->newport, hash);
 #endif
 				break;
@@ -243,7 +245,9 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "get_outflow_map_port: failed to assign a new map port for " NIP4_FMT ":%d\n", NIP4(oldaddr), oldp);
+#endif
 				return -1;
 			}
 		}
@@ -263,7 +267,7 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
-int get_inflow_map_port(__be16 newp, struct map_list *list, __be32* oldaddr, __be16 *oldp)
+int get_inflow_map_port(struct map_list *list, __be16 newp, __be32* oldaddr, __be16 *oldp)
 {
 	struct map_tuple *iter;
 	struct hlist_node *temp;
@@ -280,7 +284,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32* oldaddr, __b
 	hash = port_hashfn(newp);
 	if (hlist_empty(&list->in_chain[hash])) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "get_inflow_map_port: in_chain[%d] empty.\n", hash);
+#endif
 		return -1;
 	}
 
@@ -289,7 +295,7 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32* oldaddr, __b
 			*oldaddr = iter->oldaddr;
 			*oldp = iter->oldport;
 			do_gettimeofday(&iter->timer);
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "get_inflow_map_port: find map " NIP4_FMT ":%d -> %d on in_chain[%d]\n", NIP4(iter->oldaddr), iter->oldport, iter->newport, hash);
 #endif
 			ret = 0;
@@ -352,7 +358,7 @@ struct map_tuple* add_new_map(__be32 oldaddr, __be16 oldp, __be16 newp, struct m
 	list_add(&map->node, &list->chain);
 	list->size++;
 	list->last_alloc = newp;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 	printk("add_new_map: add new map " NIP4_FMT ":%d -> %d\n", NIP4(oldaddr), oldp, newp);
 #endif
 	return map;
@@ -373,7 +379,7 @@ void refresh_map_list(struct map_list *list)
 		if (delta >= list->timeout) {
 			list_del(&iter->node);
 			list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 			printk("refresh_map_list: time out map " NIP4_FMT ":%d -> %d\n", NIP4(iter->oldaddr), iter->oldport, iter->newport);
 #endif
 			kfree(iter);
@@ -393,7 +399,7 @@ void free_map_list(struct map_list *list)
 	list_for_each_entry_safe(iter, temp, &list->chain, node) {
 		list_del(&iter->node);
 		list->size--;
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 		printk("free_map_list: delete map " NIP4_FMT ":%d -> %d\n", NIP4(iter->oldaddr), iter->oldport, iter->newport);
 #endif
 		kfree(iter);
@@ -406,7 +412,7 @@ EXPORT_SYMBOL(free_map_list);
 /* mapping operations */
 
 // Get mapped port for outflow packet, input and output are in host byte order, return -1 if failed
-int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __be16 *newp)
+int get_outflow_map_port(struct map_list *list, __be32 oldaddr, __be16 oldp, u16 ratio, u16 adjacent, u16 offset, __be16 *newp)
 {
 	__be16 retport;
 	
@@ -418,7 +424,9 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 	
 	if (get_list_size(list) >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk("get_outflow_map_port: map list full.\n");
+#endif
 		return -1;
 	}
 	
@@ -430,7 +438,9 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 			if (iter->oldport == oldp && iter->oldaddr == oldaddr) {
 				retport = iter->newport;
 				do_gettimeofday(&iter->timer);
+#ifdef IVI_DEBUG_MAP
 				printk("get_outflow_map_port: find map " NIP4_FMT ":%d -> %d\n", NIP4(iter->oldaddr), iter->oldport, iter->newport);
+#endif
 				break;
 			}
 		}
@@ -479,7 +489,9 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 				printk("get_outflow_map_port: failed to assign a new map port for " NIP4_FMT ":%d\n", NIP4(oldaddr), oldp);
+#endif
 				return -1;
 			}
 		}
@@ -499,7 +511,7 @@ int get_outflow_map_port(__be32 oldaddr, __be16 oldp, struct map_list *list, __b
 EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
-int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __be16 *oldp)
+int get_inflow_map_port(struct map_list *list, __be16 newp, __be32 *oldaddr, __be16 *oldp)
 {
 	struct map_tuple *iter;
 	int ret = -1;
@@ -513,7 +525,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __b
 	
 	if (list_empty(&list->chain)) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk("get_inflow_map_port: map list empty.\n");
+#endif
 		return -1;
 	}
 
@@ -522,7 +536,9 @@ int get_inflow_map_port(__be16 newp, struct map_list *list, __be32 *oldaddr, __b
 			*oldaddr = iter->oldaddr;
 			*oldp = iter->oldport;
 			do_gettimeofday(&iter->timer);
+#ifdef IVI_DEBUG_MAP
 			printk("get_inflow_map_port: find map " NIP4_FMT ":%d -> %d\n", NIP4(iter->oldaddr), iter->oldport, iter->newport);
+#endif
 			ret = 0;
 			break;
 		}
