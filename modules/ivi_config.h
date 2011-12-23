@@ -14,8 +14,10 @@
 //#define IVI_DEBUG_TCP
 
 // comment this line out if you don't want to track any debug information of rule mapping
-#define IVI_DEBUG_RULE
+//#define IVI_DEBUG_RULE
 
+// comment this line out if you don't want to track any debug information of port mapping
+//#define IVI_DEBUG_MAP
 
 #define IVI_MODE_CORE           0   // Stateless core translator
 #define IVI_MODE_CORE_STATEFUL  1   // Stateful core translator (partial-state)

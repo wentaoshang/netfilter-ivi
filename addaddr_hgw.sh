@@ -7,11 +7,13 @@ echo 0 > /proc/sys/net/ipv6/conf/eth0/autoconf
 echo 0 > /proc/sys/net/ipv6/conf/eth1/autoconf
 
 # configure eth0 -- IPv6 interface
+ifconfig eth0 down
 ifconfig eth0 up
 ifconfig eth0 inet6 add 2001:250:3::150/64
 ip -6 route add default via 2001:250:3::149 dev eth0
 
 # configure eth1 -- IPv4 interface
+ifconfig eth1 down
 ifconfig eth1 up
 ifconfig eth1 202.38.111.254/24
 

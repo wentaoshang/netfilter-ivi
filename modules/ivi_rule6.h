@@ -13,7 +13,7 @@
 #include "ivi_rule.h"
 
 extern int ivi_rule6_insert(struct rule_info *rule);
-extern int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u8 *fmt);
+extern int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u16 *ratio, u16 *adjacent, u8 *fmt);
 extern int ivi_rule6_delete(struct rule_info *rule);
 extern void ivi_rule6_flush(void);
 

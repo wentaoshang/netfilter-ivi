@@ -44,6 +44,8 @@ struct tleaf_info {
 	u32 mask_plen;
 	struct in6_addr prefix6;
 	int prefix6_len;
+	u16 ratio;
+	u16 adjacent;
 	u8 format;
 };
 
@@ -341,9 +343,7 @@ static struct tnode *inflate(struct tnode *tn)
 
 		/* A leaf or an internal node with skipped bits */
 		if (IS_LEAF(node) || ((struct tnode *)node)->pos > tn->pos + tn->bits) {
-				if (tkey_extract_bits(node->key, 
-									  oldtnode->pos + oldtnode->bits,
-									  1) == 0)
+				if (tkey_extract_bits(node->key, oldtnode->pos + oldtnode->bits, 1) == 0)
 					put_child(tn, 2*i, node);
 				else
 					put_child(tn, 2*i+1, node);
@@ -627,7 +627,7 @@ static struct tleaf *fib_find_node(unsigned int key)
 	return NULL;
 }
 
-static int check_leaf(struct tleaf *l, t_key key, struct in6_addr *prefix6, int *plen6, u8 *fmt)
+static int check_leaf(struct tleaf *l, t_key key, struct in6_addr *prefix6, int *plen6, u16 *ratio, u16 *adjacent, u8 *fmt)
 {
 	struct tleaf_info *li;
 	struct hlist_head *head = &l->head;
@@ -636,6 +636,8 @@ static int check_leaf(struct tleaf *l, t_key key, struct in6_addr *prefix6, int 
 		if (l->key == (key & li->mask_plen)) {
 			ipv6_addr_copy(prefix6, &li->prefix6);
 			*plen6 = li->prefix6_len;
+			*ratio = li->ratio;
+			*adjacent = li->adjacent;
 			*fmt = li->format;
 			return 0;
 		}
@@ -643,7 +645,7 @@ static int check_leaf(struct tleaf *l, t_key key, struct in6_addr *prefix6, int 
 	return 1;
 }
 
-int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u8 *fmt)
+int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u16 *ratio, u16 *adjacent, u8 *fmt)
 {
 	int ret;
 	struct tentry *n;
@@ -663,10 +665,13 @@ int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u8 *fmt)
 
 	/* Just a leaf? */
 	if (IS_LEAF(n)) {
-		ret = check_leaf((struct tleaf *)n, key, prefix6, plen6, fmt);
+		ret = check_leaf((struct tleaf *)n, key, prefix6, plen6, ratio, adjacent, fmt);
+		if (ret == 0) {
 #ifdef IVI_DEBUG_RULE
-	printk(KERN_DEBUG "ivi_rule_lookup: " NIP4_FMT " -> " NIP6_FMT "/%d, address format %d\n", NIP4(key), NIP6(*prefix6), *plen6, *fmt);
+		printk(KERN_DEBUG "ivi_rule_lookup: " NIP4_FMT " -> " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
+			NIP4(key), NIP6(*prefix6), *plen6, *ratio, *adjacent, *fmt);
 #endif
+		}
 		goto found;
 	}
 
@@ -687,9 +692,13 @@ int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u8 *fmt)
 		}
 
 		if (IS_LEAF(n)) {
-			ret = check_leaf((struct tleaf *)n, key, prefix6, plen6, fmt);
+			ret = check_leaf((struct tleaf *)n, key, prefix6, plen6, ratio, adjacent, fmt);
 			if (ret > 0)
 				goto backtrace;
+#ifdef IVI_DEBUG_RULE
+			printk(KERN_DEBUG "ivi_rule_lookup: " NIP4_FMT " -> " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
+				NIP4(key), NIP6(*prefix6), *plen6, *ratio, *adjacent, *fmt);
+#endif
 			goto found;
 		}
 
@@ -877,18 +886,22 @@ int ivi_rule_insert(struct rule_info *rule)
 		// Update satellite data.
 		ipv6_addr_copy(&li->prefix6, &rule->prefix6);
 		li->prefix6_len = rule->plen6;
+		li->ratio = rule->ratio;
+		li->adjacent = rule->adjacent;
 		li->format = rule->format;
 	} else {
 		li = trie_insert_node(key, plen);
 		// Insert satellite data.
 		ipv6_addr_copy(&li->prefix6, &rule->prefix6);
 		li->prefix6_len = rule->plen6;
+		li->ratio = rule->ratio;
+		li->adjacent = rule->adjacent;
 		li->format = rule->format;
 	}
 	spin_unlock_bh(&trie_lock);
 #ifdef IVI_DEBUG_RULE
-	printk(KERN_DEBUG "ivi_rule_insert: " NIP4_FMT "/%d -> " NIP6_FMT "/%d, address format %d\n", 
-		NIP4(rule->prefix4), rule->plen4, NIP6(rule->prefix6), rule->plen6, rule->format);
+	printk(KERN_DEBUG "ivi_rule_insert: " NIP4_FMT "/%d -> " NIP6_FMT "/%d, ratio %d, adjacent %d, address format %d\n", 
+		NIP4(rule->prefix4), rule->plen4, NIP6(rule->prefix6), rule->plen6, rule->ratio, rule->adjacent, rule->format);
 #endif
 	return 0;
 }
@@ -938,14 +951,15 @@ int ivi_rule_delete(struct rule_info *rule)
 	/* Here we need to check whether 'li' matches the provided 'rule' 
 	 *   since no check against *prefix6* is performed before.
 	 */
-	if (ipv6_addr_cmp(&li->prefix6, &rule->prefix6) || li->prefix6_len != rule->plen6 || li->format != rule->format)
+	if (ipv6_addr_cmp(&li->prefix6, &rule->prefix6) || li->prefix6_len != rule->plen6 
+		|| li->format != rule->format || li->ratio != rule->ratio || li->adjacent != rule->adjacent)
 		goto out_from_lock;
 	
 	hlist_del(&li->node);
 	tleaf_info_free(li);
 #ifdef IVI_DEBUG_RULE
-	printk(KERN_DEBUG "ivi_rule_delete: " NIP4_FMT "/%d -> " NIP6_FMT "/%d, address format %d\n", 
-		NIP4(rule->prefix4), rule->plen4, NIP6(rule->prefix6), rule->plen6, rule->format);
+	printk(KERN_DEBUG "ivi_rule_delete: " NIP4_FMT "/%d -> " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
+		NIP4(rule->prefix4), rule->plen4, NIP6(rule->prefix6), rule->plen6, rule->ratio, rule->adjacent, rule->format);
 #endif
 
 	if (hlist_empty(&l->head))
@@ -1067,7 +1081,7 @@ static void __exit ivi_rule_exit(void) {
 	ivi_rule_flush();
 #ifdef IVI_DEBUG
 	printk(KERN_DEBUG "IVI: module ivi_rule unloaded.\n");
-	printk(KERN_DEBUG "IVI: module ivi_rule memory balance = %d", balance);
+	printk(KERN_DEBUG "IVI: module ivi_rule memory balance = %d\n", balance);
 #endif
 }
 module_exit(ivi_rule_exit);

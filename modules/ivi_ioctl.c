@@ -30,7 +30,6 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 	struct net_device *dev;
 	char temp[IVI_IOCTL_LEN];
 	struct rule_info rule;
-	__be16 tmp;
 	
 	switch (cmd) {
 		case IVI_IOC_V4DEV:
@@ -117,71 +116,50 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			break;
 
 		case IVI_IOC_ADJACENT:
-			if (copy_from_user(&adjacent, (__be16 *)arg, sizeof(__be16)) > 0) {
+			if (copy_from_user(&hgw_adjacent, (u16 *)arg, sizeof(u16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: adjacent set to %d.\n", adjacent);
+			printk(KERN_INFO "ivi_ioctl: adjacent set to %d.\n", hgw_adjacent);
 			break;
 		
 		case IVI_IOC_POSTFIX:
-			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
+			if (copy_from_user(&hgw_ratio, (u16 *)arg, sizeof(u16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", ratio);
-			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
+			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", hgw_ratio);
+			if (copy_from_user(&hgw_offset, ((u16 *)arg) + 1, sizeof(u16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", offset);
-			addr_fmt = ADDR_FMT_POSTFIX;
-			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
+			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", hgw_offset);
+			hgw_fmt = ADDR_FMT_POSTFIX;
+			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", hgw_fmt);
 			break;
 
 		case IVI_IOC_SUFFIX:
-			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
+			if (copy_from_user(&hgw_ratio, (u16 *)arg, sizeof(u16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", ratio);
-			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
+			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", hgw_ratio);
+			if (copy_from_user(&hgw_offset, ((u16 *)arg) + 1, sizeof(u16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", offset);
+			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", hgw_offset);
 			
-			suffix = 0;
-			tmp = ratio;
-			while (tmp >> 1 != 0) {
-				suffix++;
-				tmp = tmp >> 1;
-			}
-			suffix = suffix << 12;
-			suffix += offset & 0x0fff;
-			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", suffix);
-			addr_fmt = ADDR_FMT_SUFFIX;
-			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
+			hgw_suffix = fls(hgw_ratio) - 1;
+			hgw_suffix = hgw_suffix << 12;
+			hgw_suffix += hgw_offset & 0x0fff;
+			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", hgw_suffix);
+			hgw_fmt = ADDR_FMT_SUFFIX;
+			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", hgw_fmt);
 			break;
 		
 		case IVI_IOC_MSS_LIMIT:
-			if (copy_from_user(&mss_limit, (__u16 *)arg, sizeof(__u16)) > 0) {
+			if (copy_from_user(&mss_limit, (u16 *)arg, sizeof(u16)) > 0) {
 				return -EACCES;
 			}
 			printk(KERN_INFO "ivi_ioctl: mss limit set to %d.\n", mss_limit);
 			break;
-/*
-		case IVI_IOC_PD_DEFAULT:
-			if (copy_from_user(v6default, (__u8 *)arg, 16) > 0) {
-				return -EACCES;
-			}
-			printk(KERN_INFO "ivi_ioctl: default pd prefix set to %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x.\n", 
-				ntohs(((__be16 *)v6default)[0]), ntohs(((__be16 *)v6default)[1]), ntohs(((__be16 *)v6default)[2]), ntohs(((__be16 *)v6default)[3]), 
-				ntohs(((__be16 *)v6default)[4]), ntohs(((__be16 *)v6default)[5]), ntohs(((__be16 *)v6default)[6]), ntohs(((__be16 *)v6default)[7]));
-			break;
-		
-		case IVI_IOC_PD_DEFAULT_LEN:
-			if (copy_from_user(&v6defaultlen, (__be32 *)arg, sizeof(__be32)) > 0) {
-				return -EACCES;
-			}
-			printk(KERN_INFO "ivi_ioctl: default pd prefix length set to %d.\n", v6defaultlen);
-			break;
-*/
+
 		case IVI_IOC_ADD_RULE:
 			if (copy_from_user(&rule, (void *)arg, sizeof(struct rule_info)) > 0) {
 				return -EACCES;
@@ -192,7 +170,8 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 				return -EINVAL;
 			}
 			if (ivi_rule6_insert(&rule) != 0) {
-				printk(KERN_DEBUG "ivi_ioctl: fail to insert " NIP6_FMT " -> %d\n", NIP6(rule.prefix6), rule.plen6);
+				printk(KERN_DEBUG "ivi_ioctl: fail to insert " NIP6_FMT " -> %d, address format %d\n", 
+					NIP6(rule.prefix6), rule.plen6, rule.format);
 				return -EINVAL;
 			}
 			break;

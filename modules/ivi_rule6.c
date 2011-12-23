@@ -13,6 +13,8 @@ struct rule6_node {
 	struct in6_addr key;
 	int bit_pos;  // plen6 + plen4
 	int plen6;  // actuall ipv6 prefix length
+	u16 ratio;
+	u16 adjacent;
 	u8 format;
 	u8 flag;
 };
@@ -72,14 +74,15 @@ static __inline__ void node_free(struct rule6_node *n)
  * Rule insertion
  */
 
-static struct rule6_node* radix_insert_node(const struct in6_addr *addr, int plen, int plen6, u8 fmt)
+static struct rule6_node* radix_insert_node(const struct in6_addr *addr, struct rule_info *rule)
 {
 	struct rule6_node *fn, *in, *ln, *pn;
-	int bit;
+	int plen, bit;
 	u32 dir;
 
 	pn = NULL;
 	dir = 0;
+	plen = rule->plen6 + rule->plen4;
 
 	if (!radix)
 		goto root_empty;
@@ -119,8 +122,10 @@ root_empty:
 	/* set new leaf's key */
 	ipv6_addr_copy(&ln->key, addr);
 	ln->bit_pos = plen;
-	ln->plen6 = plen6;
-	ln->format = fmt;
+	ln->plen6 = rule->plen6;
+	ln->ratio = rule->ratio;
+	ln->adjacent = rule->adjacent;
+	ln->format = rule->format;
 	ln->parent = pn;
 	ln->flag |= RN_RINFO;
 
@@ -192,8 +197,10 @@ insert_above:
 		/* set new leaf's key */
 		ipv6_addr_copy(&ln->key, addr);
 		ln->bit_pos = plen;
-		ln->plen6 = plen6;
-		ln->format = fmt;
+		ln->plen6 = rule->plen6;
+		ln->ratio = rule->ratio;
+		ln->adjacent = rule->adjacent;
+		ln->format = rule->format;
 		ln->parent = in;
 		ln->flag |= RN_RINFO;
 
@@ -221,8 +228,10 @@ insert_above:
 		/* set new leaf's key */
 		ipv6_addr_copy(&ln->key, addr);
 		ln->bit_pos = plen;
-		ln->plen6 = plen6;
-		ln->format = fmt;
+		ln->plen6 = rule->plen6;
+		ln->ratio = rule->ratio;
+		ln->adjacent = rule->adjacent;
+		ln->format = rule->format;
 		ln->parent = pn;
 		ln->flag |= RN_RINFO;
 
@@ -263,17 +272,17 @@ int ivi_rule6_insert(struct rule_info *rule)
 	}
 
 	spin_lock_bh(&radix_lock);
-	if (radix_insert_node(&rule->prefix6, rule->plen6 + rule->plen4, rule->plen6, rule->format) == NULL) {
+	if (radix_insert_node(&rule->prefix6, rule) == NULL) {
 		ret = -1;
 #ifdef IVI_DEBUG_RULE
-		printk(KERN_DEBUG "ivi_rule6_insert: failed to insert entry " NIP6_FMT "/%d, address format %d\n", 
-			NIP6(rule->prefix6), rule->plen6 + rule->plen4, rule->format);
+		printk(KERN_DEBUG "ivi_rule6_insert: failed to insert entry " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
+			NIP6(rule->prefix6), rule->plen6 + rule->plen4, rule->ratio, rule->adjacent, rule->format);
 #endif
 	} else {
 		ret = 0;
 #ifdef IVI_DEBUG_RULE
-		printk(KERN_DEBUG "ivi_rule6_insert: " NIP6_FMT "/%d, address format %d\n", 
-			NIP6(rule->prefix6), rule->plen6 + rule->plen4, rule->format);
+		printk(KERN_DEBUG "ivi_rule6_insert: " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
+			NIP6(rule->prefix6), rule->plen6 + rule->plen4, rule->ratio, rule->adjacent, rule->format);
 #endif
 	}
 	spin_unlock_bh(&radix_lock);
@@ -323,7 +332,7 @@ static struct rule6_node* radix_lookup(const struct in6_addr *addr)
 	return NULL;
 }
 
-int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u8 *fmt)
+int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u16 *ratio, u16 *adjacent, u8 *fmt)
 {
 	struct rule6_node* n;
 	int ret;
@@ -340,6 +349,8 @@ int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u8 *fmt)
 		printk(KERN_DEBUG "ivi_rule6_lookup: " NIP6_FMT " -> %d\n", NIP6(n->key), n->bit_pos);
 #endif
 		*plen = n->plen6;
+		*ratio = n->ratio;
+		*adjacent = n->adjacent;
 		*fmt = n->format;
 		ret = 0;
 	}
@@ -635,7 +646,7 @@ static void __exit ivi_rule6_exit(void) {
 	ivi_rule6_flush();
 #ifdef IVI_DEBUG
 	printk(KERN_DEBUG "IVI: module ivi_rule6 unloaded.\n");
-	printk(KERN_DEBUG "IVI: module ivi_rule6 memory balance = %d", balance);
+	printk(KERN_DEBUG "IVI: module ivi_rule6 memory balance = %d\n", balance);
 #endif
 }
 module_exit(ivi_rule6_exit);

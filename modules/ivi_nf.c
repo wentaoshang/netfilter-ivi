@@ -10,13 +10,6 @@
 
 #include "ivi_nf.h"
 
-//
-// Walk around the bug in netfilter.ipv4.h and netfilter_ipv6.h.
-// Those macros are not defined when we have __KERNEL__ defined.
-//
-#define NF_IP_PRE_ROUTING     0
-#define NF_IP6_PRE_ROUTING    0
-
 static struct net_device *v4_dev, *v6_dev;
 
 static int running;
@@ -58,7 +51,7 @@ struct nf_hook_ops v4_ops = {
 	hook	:	nf_hook4,
 	owner	:	THIS_MODULE,
 	pf	:	PF_INET,
-	hooknum	:	NF_IP_PRE_ROUTING,
+	hooknum	:	NF_INET_PRE_ROUTING,
 	priority:	NF_IP_PRI_FIRST,
 };
 
@@ -67,7 +60,7 @@ struct nf_hook_ops v6_ops = {
 	hook	:	nf_hook6,
 	owner	:	THIS_MODULE,
 	pf	:	PF_INET6,
-	hooknum	:	NF_IP6_PRE_ROUTING,
+	hooknum	:	NF_INET_PRE_ROUTING,
 	priority:	NF_IP6_PRI_FIRST,
 };
 

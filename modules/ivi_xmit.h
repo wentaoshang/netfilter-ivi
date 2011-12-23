@@ -7,11 +7,13 @@
 #include <linux/modversions.h>
 #endif
 #include <linux/module.h>
+#include <linux/version.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/kthread.h>
 #include <linux/etherdevice.h>
 #include <linux/if_ether.h>
+#include <linux/in.h>
 #include <asm/checksum.h>
 #include <net/arp.h>
 #include <net/ip.h>
@@ -31,14 +33,12 @@ extern __be32 v4mask;
 extern __be32 v4publicaddr;
 extern __u8 v6prefix[16];
 extern __be32 v6prefixlen;
-//extern __u8 v6default[16];
-//extern __be32 v6defaultlen;
 
-extern __u8 ivi_mode;
+extern u8 ivi_mode;
 
-extern __u8 addr_fmt;
+extern u8 hgw_fmt;
 
-extern __u16 mss_limit;
+extern u16 mss_limit;
 
 extern int ivi_v4v6_xmit(struct sk_buff *skb);
 extern int ivi_v6v4_xmit(struct sk_buff *skb);
