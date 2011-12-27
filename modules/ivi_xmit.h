@@ -13,6 +13,8 @@
 #include <linux/kthread.h>
 #include <linux/etherdevice.h>
 #include <linux/if_ether.h>
+#include <linux/version.h>
+#include <linux/in.h>
 #include <asm/checksum.h>
 #include <net/arp.h>
 #include <net/ip.h>

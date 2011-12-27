@@ -16,9 +16,19 @@
 
 #include "ivi_xmit.h"
 
-static __inline int mc_v4_addr(const unsigned int *addr) {
-	return ((ntohl(*addr) & 0xe0000000) == 0xe0000000);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,31)
+
+static inline struct dst_entry *skb_dst(const struct sk_buff *skb)
+{
+	return skb->dst;
 }
+
+static inline void skb_dst_set(struct sk_buff *skb, struct dst_entry *dst)
+{
+	skb->dst = dst;
+}
+
+#endif
 
 static __inline int link_local_addr(const struct in6_addr *addr) {
 	return ((addr->s6_addr32[0] & htonl(0xffc00000)) == htonl(0xfe800000));
@@ -96,7 +106,9 @@ static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _local)
 		fmt = addr_fmt;
 	} else {
 		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &fmt) != 0) {
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
+#endif
 			return -1;
 		}
 		prefixlen /= 8; /* counted in bytes */
@@ -126,7 +138,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u8 _local)
 
 	if (link_local_addr(v6addr)) {
 		// Do not translate ipv6 link local address.
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "ipaddr_6to4: ignore link local address.\n");
 #endif
 		return -1;
@@ -137,7 +149,9 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u8 _local)
 		prefixlen = v6prefixlen;
 	} else {
 		if (ivi_rule6_lookup(v6addr, &prefixlen) != 0) {
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
+#endif
 			return -1;
 		}
 		prefixlen /= 8; /* counted in bytes */
@@ -168,10 +182,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	//struct rt6_info *rt;
 	
 	ip4h = ip_hdr(skb);
-	if (mc_v4_addr(&(ip4h->daddr))) {
+	if (ipv4_is_multicast(ip4h->daddr) || ipv4_is_lbcast(ip4h->daddr) || ipv4_is_loopback(ip4h->daddr)) {
 		// By pass multicast packet
-		printk(KERN_DEBUG "ivi_v4v6_xmit: by pass ipv4 multicast packet.\n");
-		return -EINVAL;
+		printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 multicast/broadcast/loopback dest address.\n");
+		return -EINVAL;  // Just accept.
 	}
 	
 	if (unlikely(addr_is_v4host(&(ip4h->saddr)) == 0)) {
@@ -269,7 +283,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			skb_copy_bits(skb, ip4h->ihl * 4, payload, plen);
 			tcph = (struct tcphdr *)payload;
 
-			if (tcph->syn && !tcph->ack && (tcph->doff > 5)) {
+			if (tcph->syn && (tcph->doff > 5)) {
 				__u16 *option = (__u16*)tcph;
 				if (option[10] == htons(0x0204)) {
 					if (ntohs(option[11]) > mss_limit) {
@@ -323,7 +337,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		kfree_skb(skb);
 		return 1;
 	} else {
-		printk(KERN_DEBUG "ivi_v4v6_xmit: ip6_local_out() failed with return value %d.\n", err);
+		printk(KERN_DEBUG "ivi_v4v6_xmit: ip6_local_out() failed with return value %d. Packet payload len = %d\n", err, plen);
 		return 0;  // Packet will be dropped by netfilter.
 	}
 }
@@ -411,6 +425,15 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 					return 0;
 				} else {
 					tcph->dest = htons(oldp);
+				}
+			}
+
+			if (tcph->syn && (tcph->doff > 5)) {
+				__u16 *option = (__u16*)tcph;
+				if (option[10] == htons(0x0204)) {
+					if (ntohs(option[11]) > mss_limit) {
+						option[11] = htons(mss_limit);
+					}
 				}
 			}
 
