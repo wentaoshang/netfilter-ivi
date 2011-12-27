@@ -243,7 +243,9 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "get_outflow_map_port: failed to assign a new map port for %d\n", oldp);
+#endif
 				return -1;
 			}
 		}
@@ -416,7 +418,9 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 	
 	if (get_list_size(list) >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "get_outflow_map_port: map list full.\n");
+#endif
 		return -1;
 	}
 	
@@ -479,7 +483,9 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp)
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&list->lock);
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_DEBUG "get_outflow_map_port: failed to assign a new map port for %d\n", oldp);
+#endif
 				return -1;
 			}
 		}

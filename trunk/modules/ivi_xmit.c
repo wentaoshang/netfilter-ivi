@@ -87,7 +87,9 @@ static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, 
 		suffix = hgw_suffix;
 	} else {
 		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &ratio, &adjacent, &fmt) != 0) {
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
+#endif
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
@@ -126,7 +128,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 
 	if (link_local_addr(v6addr)) {
 		// Do not translate ipv6 link local address.
-#ifdef IVI_DEBUG
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "ipaddr_6to4: ignore link local address.\n");
 #endif
 		return -1;
@@ -137,7 +139,9 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 		prefixlen = v6prefixlen;
 	} else {
 		if (ivi_rule6_lookup(v6addr, &prefixlen, ratio, adjacent, &fmt) != 0) {
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
+#endif
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
@@ -180,7 +184,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	eth4 = eth_hdr(skb);
 	if (unlikely(eth4->h_proto != __constant_ntohs(ETH_P_IP))) {
 		// This should not happen since we are hooked on PF_INET.
-		printk(KERN_ERR "ivi_v4v6_xmit: non-IPv4 packet received on IPv4 hook.\n");
+		printk(KERN_ERR "ivi_v4v6_xmit: non-IPv4 packet type %x received on IPv4 hook.\n", ntohs(eth4->h_proto));
 		return -EINVAL;  // Just accept.
 	}
 
@@ -314,7 +318,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			skb_copy_bits(skb, ip4h->ihl * 4, payload, plen);
 			tcph = (struct tcphdr *)payload;
 
-			if (tcph->syn && !tcph->ack && (tcph->doff > 5)) {
+			if (tcph->syn && (tcph->doff > 5)) {
 				__u16 *option = (__u16*)tcph;
 				if (option[10] == htons(0x0204)) {
 					if (ntohs(option[11]) > mss_limit) {
@@ -390,7 +394,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	eth6 = eth_hdr(skb);
 	if (unlikely(eth6->h_proto != __constant_ntohs(ETH_P_IPV6))) {
 		// This should not happen since we are hooked on PF_INET6.
-		printk(KERN_ERR "ivi_v6v4_xmit: non-IPv6 packet received on IPv6 hook.\n");
+		printk(KERN_ERR "ivi_v6v4_xmit: non-IPv6 packet type %x received on IPv6 hook.\n", ntohs(eth6->h_proto));
 		return -EINVAL;  // Just accept.
 	}
 
@@ -476,6 +480,15 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 #endif
 					kfree_skb(newskb);
 					return 0;
+				}
+			}
+
+			if (tcph->syn && (tcph->doff > 5)) {
+				__u16 *option = (__u16*)tcph;
+				if (option[10] == htons(0x0204)) {
+					if (ntohs(option[11]) > mss_limit) {
+						option[11] = htons(mss_limit);
+					}
 				}
 			}
 

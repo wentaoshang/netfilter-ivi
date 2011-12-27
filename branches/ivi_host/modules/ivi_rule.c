@@ -1067,7 +1067,7 @@ static void __exit ivi_rule_exit(void) {
 	ivi_rule_flush();
 #ifdef IVI_DEBUG
 	printk(KERN_DEBUG "IVI: module ivi_rule unloaded.\n");
-	printk(KERN_DEBUG "IVI: module ivi_rule memory balance = %d", balance);
+	printk(KERN_DEBUG "IVI: module ivi_rule memory balance = %d\n", balance);
 #endif
 }
 module_exit(ivi_rule_exit);

@@ -15,9 +15,6 @@
 #include "ivi_map.h"
 #include "ivi_xmit.h"
 
-#ifdef __KERNEL__
-
 extern int nf_running(const int run);
 
-#endif /* __KERNEL__ */
 #endif /* IVI_NF_H */
