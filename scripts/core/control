@@ -1,6 +1,6 @@
 #!/bin/sh
 
-if [ ! -f modules/ivi_map.ko ] ; then
+if [ ! -f ../../modules/ivi_map.ko ] ; then
 	echo "Error: please make modules first."
 	exit 1
 fi
@@ -11,19 +11,19 @@ start() {
 		exit 1
 	fi
 	echo "Starting IVI modules: "
-	insmod modules/ivi_rule.ko
+	insmod ../../modules/ivi_rule.ko
 	echo "insmod ivi_rule.ko"
-	insmod modules/ivi_rule6.ko
+	insmod ../../modules/ivi_rule6.ko
 	echo "insmod ivi_rule6.ko"
-	insmod modules/ivi_map.ko
+	insmod ../../modules/ivi_map.ko
 	echo "insmod ivi_map.ko"
-	insmod modules/ivi_map_tcp.ko
+	insmod ../../modules/ivi_map_tcp.ko
 	echo "insmod ivi_map_tcp.ko"
-	insmod modules/ivi_xmit.ko
+	insmod ../../modules/ivi_xmit.ko
 	echo "insmod ivi_xmit.ko"
-	insmod modules/ivi_nf.ko
+	insmod ../../modules/ivi_nf.ko
 	echo "insmod ivi_nf.ko"
-	insmod modules/ivi_ioctl.ko
+	insmod ../../modules/ivi_ioctl.ko
 	echo "insmod ivi_ioctl.ko"
 	if [ ! -e /dev/ivi ] ; then
 		mknod /dev/ivi c 324 0

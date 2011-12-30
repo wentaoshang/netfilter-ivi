@@ -87,19 +87,18 @@ static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, 
 		suffix = hgw_suffix;
 	} else {
 		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &ratio, &adjacent, &fmt) != 0) {
-#ifdef IVI_DEBUG_MAP
+#ifdef IVI_DEBUG_RULE
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
 #endif
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
-		if (fmt != ADDR_FMT_NONE) {
+		if (fmt != ADDR_FMT_NONE && !ratio && !adjacent) {
 			offset = (port / ratio) % adjacent;
-			
+			suffix = fls(ratio) - 1;
+			suffix = suffix << 12;
+			suffix += offset & 0x0fff;
 		}
-		suffix = fls(ratio) - 1;
-		suffix = suffix << 12;
-		suffix += offset & 0x0fff;
 	}
 
 	v6addr->s6_addr[prefixlen] = (unsigned char)(addr >> 24);
@@ -128,18 +127,18 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 
 	if (link_local_addr(v6addr)) {
 		// Do not translate ipv6 link local address.
-#ifdef IVI_DEBUG_MAP
+#ifdef IVI_DEBUG_RULE
 		printk(KERN_DEBUG "ipaddr_6to4: ignore link local address.\n");
 #endif
 		return -1;
 	}
 
-	if ((ivi_mode >= IVI_MODE_HGW) && (_dir == ADDR_DIR_SRC)) {
+	if ((ivi_mode >= IVI_MODE_HGW) && (_dir == ADDR_DIR_DST)) {
 		// Fast path for local address translation in hgw mode
 		prefixlen = v6prefixlen;
 	} else {
 		if (ivi_rule6_lookup(v6addr, &prefixlen, ratio, adjacent, &fmt) != 0) {
-#ifdef IVI_DEBUG_MAP
+#ifdef IVI_DEBUG_RULE
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
 #endif
 			return -1;
