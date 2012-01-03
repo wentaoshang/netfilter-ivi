@@ -93,7 +93,8 @@ static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, 
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
-		if (fmt != ADDR_FMT_NONE && !ratio && !adjacent) {
+		
+		if (fmt != ADDR_FMT_NONE && ratio && adjacent) {
 			offset = (port / ratio) % adjacent;
 			suffix = fls(ratio) - 1;
 			suffix = suffix << 12;
