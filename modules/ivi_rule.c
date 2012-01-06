@@ -341,9 +341,7 @@ static struct tnode *inflate(struct tnode *tn)
 
 		/* A leaf or an internal node with skipped bits */
 		if (IS_LEAF(node) || ((struct tnode *)node)->pos > tn->pos + tn->bits) {
-				if (tkey_extract_bits(node->key, 
-									  oldtnode->pos + oldtnode->bits,
-									  1) == 0)
+				if (tkey_extract_bits(node->key, oldtnode->pos + oldtnode->bits, 1) == 0)
 					put_child(tn, 2*i, node);
 				else
 					put_child(tn, 2*i+1, node);

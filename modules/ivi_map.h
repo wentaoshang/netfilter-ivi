@@ -30,6 +30,7 @@ struct map_tuple {
 	__be16 oldport;
 	__be16 newport;
 	struct timeval timer;
+	bool xlated;
 };
 
 /* map list structure */
@@ -70,7 +71,7 @@ extern void refresh_map_list(struct map_list *list);
 extern void free_map_list(struct map_list *list);
 
 /* mapping operations */
-extern int get_outflow_map_port(__be16 oldp, struct map_list *list, __be16 *newp);
-extern int get_inflow_map_port(__be16 newp, struct map_list *list, __be16 *oldp);
+extern int get_outflow_map_port(__be16 oldp, struct map_list *list, bool xlated, __be16 *newp);
+extern int get_inflow_map_port(__be16 newp, struct map_list *list, bool *xlated, __be16 *oldp);
 
 #endif /* IVI_MAP_H */

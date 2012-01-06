@@ -26,12 +26,25 @@ unsigned int nf_hook4(unsigned int hooknum, struct sk_buff *skb,
 	
 	if (ret == 0) {
 		return NF_DROP;    // Tell netfilter to drop packet.
-	}
-	else if (ret == 1) {
+	} else if (ret == 1) {
 		return NF_STOLEN;  // IVI translation success. The 'skb' is freed in v4v6 xmit function.
-	}
-	else {
+	} else {
 		return NF_ACCEPT;  // By-pass.
+	}
+
+}
+
+unsigned int nf_hook6_out(unsigned int hooknum, struct sk_buff *skb,
+		const struct net_device *in, const struct net_device *out,
+		int (*okfn)(struct sk_buff *)) {
+	if (!running) {
+		return NF_ACCEPT;
+	}
+	
+	if (ivi_v6v6_xmit(skb) == 0) {
+		return NF_DROP;  // Tell netfilter to drop packet.
+	} else {
+		return NF_ACCEPT;  // Port/id map success, let netfilter continue with the packet.
 	}
 
 }
@@ -45,8 +58,7 @@ unsigned int nf_hook6(unsigned int hooknum, struct sk_buff *skb,
 
 	if (ivi_v6v4_xmit(skb) == 0) {
 		return NF_DROP;
-	}
-	else {
+	} else {
 		return NF_ACCEPT;
 	}
 
@@ -59,6 +71,15 @@ struct nf_hook_ops v4_ops = {
 	pf	:	PF_INET,
 	hooknum	:	NF_INET_LOCAL_OUT,
 	priority:	NF_IP_PRI_FIRST,
+};
+
+struct nf_hook_ops v6_out_ops = {
+	list	:	{ NULL, NULL },
+	hook	:	nf_hook6_out,
+	owner	:	THIS_MODULE,
+	pf	:	PF_INET6,
+	hooknum	:	NF_INET_LOCAL_OUT,
+	priority:	NF_IP6_PRI_FIRST,
 };
 
 struct nf_hook_ops v6_ops = {
@@ -83,6 +104,7 @@ static int __init ivi_nf_init(void) {
 	running = 0;
 
 	nf_register_hook(&v4_ops);
+	nf_register_hook(&v6_out_ops);
 	nf_register_hook(&v6_ops);
 
 #ifdef IVI_DEBUG
@@ -96,6 +118,7 @@ static void __exit ivi_nf_exit(void) {
 	running = 0;
 
 	nf_unregister_hook(&v4_ops);
+	nf_unregister_hook(&v6_out_ops);
 	nf_unregister_hook(&v6_ops);
 
 #ifdef IVI_DEBUG

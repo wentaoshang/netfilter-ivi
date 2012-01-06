@@ -210,8 +210,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			case IPPROTO_TCP:
 				tcph = (struct tcphdr *)payload;
 				
-				if (get_outflow_tcp_map_port(ntohs(tcph->source), tcph, plen, &newp) == -1) {
+				if (get_outflow_tcp_map_port(ntohs(tcph->source), tcph, plen, true, &newp) == -1) {
+#ifdef IVI_DEBUG_MAP
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for port %d (TCP).\n", ntohs(tcph->source));
+#endif
 					// Just let the packet pass with original address.
 				} else {
 					tcph->source = htons(newp);
@@ -222,8 +224,10 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			case IPPROTO_UDP:
 				udph = (struct udphdr *)payload;
 				
-				if (get_outflow_map_port(ntohs(udph->source), &udp_list, &newp) == -1) {
+				if (get_outflow_map_port(ntohs(udph->source), &udp_list, true, &newp) == -1) {
+#ifdef IVI_DEBUG_MAP
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for port %d (UDP).\n", ntohs(udph->source));
+#endif
 					// Just let the packet pass with original address.
 				} else {
 					udph->source = htons(newp);
@@ -234,22 +238,29 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			case IPPROTO_ICMP:
 				icmph = (struct icmphdr *)payload;
 				
-				if (icmph->type == ICMP_ECHO || icmph->type == ICMP_ECHOREPLY) {
-					if (get_outflow_map_port(ntohs(icmph->un.echo.id), &icmp_list, &newp) == -1) {
+				if (icmph->type == ICMP_ECHO) {
+					if (get_outflow_map_port(ntohs(icmph->un.echo.id), &icmp_list, true, &newp) == -1) {
+#ifdef IVI_DEBUG_MAP
 						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for id %d (ICMP).\n", ntohs(icmph->un.echo.id));
+#endif
 						// Just let the packet pass with original address.
 					} else {
 						icmph->un.echo.id = htons(newp);
 					}
 				} else {
+#ifdef IVI_DEBUG
 					printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type in ivi mapping. Drop packet now.\n");
+#endif
 					return 0;
 				}
 				
 				break;
 			
 			default:
+#ifdef IVI_DEBUG
 				printk(KERN_ERR "ivi_v4v6_xmit: unsupported protocol %d for ivi mapping operation.\n", ip4h->protocol);
+#endif
+				return 0;
 		}
 	}
 
@@ -306,13 +317,15 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		case IPPROTO_ICMP:  // indicating ICMPv6 packet
 			skb_copy_bits(skb, ip4h->ihl * 4, payload, plen);
 			icmp6h = (struct icmp6hdr *)payload;
-			if (icmp6h->icmp6_type == ICMP_ECHO || icmp6h->icmp6_type == ICMP_ECHOREPLY) {
-				icmp6h->icmp6_type = (icmp6h->icmp6_type == ICMP_ECHO) ? ICMPV6_ECHO_REQUEST : ICMPV6_ECHO_REPLY;
+			if (icmp6h->icmp6_type == ICMP_ECHO) {
+				icmp6h->icmp6_type = ICMPV6_ECHO_REQUEST;
 				ip6h->nexthdr = IPPROTO_ICMPV6;
 				icmp6h->icmp6_cksum = 0;
 				icmp6h->icmp6_cksum = csum_ipv6_magic(&(ip6h->saddr), &(ip6h->daddr), plen, IPPROTO_ICMPV6, csum_partial(payload, plen, 0));
 			} else {
+#ifdef IVI_DEBUG
 				printk(KERN_DEBUG "ivi_v4v6_xmit: unsupported ICMP type %d in xlate. Drop packet.\n", icmp6h->icmp6_type);
+#endif
 				kfree_skb(newskb);
 				return 0;
 			}
@@ -343,6 +356,105 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 }
 EXPORT_SYMBOL(ivi_v4v6_xmit);
 
+
+int ivi_v6v6_xmit(struct sk_buff *skb) {	
+	struct ipv6hdr *ip6h;
+	struct tcphdr *tcph;
+	struct udphdr *udph;
+	struct icmp6hdr *icmp6h;
+	__be16 newp;
+
+	if (!skb->transport_header) {
+		/*
+		 *  'skb' generated in 'ivi_v4v6_xmit' will not set this pointer, 
+		 *  while the linux kernel usually set this field in its transport layer code.
+		 *  We use this field to differentiate original IPv6 packets and translated IPv6 packets.
+		 *  By checking this field, we are also safe from possible null pointer dereference bug 
+		 *  (which is quite unlikely...). --mundou ;-)
+		 */
+		//printk(KERN_DEBUG "ivi_v6v6_xmit: by pass v4-translated packet.\n");
+		return -EINVAL;
+	}
+	
+	ip6h = ipv6_hdr(skb);
+	if (mc_v6_addr(&(ip6h->daddr))) {
+		// By pass ipv6 multicast packet
+		//printk(KERN_DEBUG "ivi_v6v6_xmit: by pass v6 multicast packet.\n");
+		return -EINVAL;  // Just accept.
+	}
+
+	if (addr_is_v6host(&(ip6h->saddr)) == 0) {
+		// Do not translate packets that are not sent from the v4-translated address.
+		printk(KERN_DEBUG "ivi_v6v6_xmit: by pass packet that is not sent from the v4-translated address.\n");
+		return -EINVAL;  // Just accept.
+	}
+	
+	switch (ip6h->nexthdr) {
+		case IPPROTO_TCP:
+			tcph = tcp_hdr(skb);
+
+			if (get_outflow_tcp_map_port(ntohs(tcph->source), tcph, ntohs(ip6h->payload_len), false, &newp) == -1) {
+#ifdef IVI_DEBUG_MAP
+				printk(KERN_ERR "ivi_v6v6_xmit: fail to perform ivi mapping for port %d (TCP), drop packet.\n", ntohs(tcph->source));
+#endif
+				return 0;
+			} else {
+				newp = htons(newp);
+				csum_replace2(&tcph->check, tcph->source, newp);
+				tcph->source = newp;
+			}
+			
+			break;
+
+		case IPPROTO_UDP:
+			udph = udp_hdr(skb);
+
+			if (get_outflow_map_port(ntohs(udph->source), &udp_list, false, &newp) == -1) {
+#ifdef IVI_DEBUG_MAP
+				printk(KERN_ERR "ivi_v6v6_xmit: fail to perform ivi mapping for port %d (UDP), drop packet.\n", ntohs(udph->source));
+#endif
+				return 0;
+			} else {
+				newp = htons(newp);
+				csum_replace2(&udph->check, udph->source, newp);
+				udph->source = newp;
+			}
+			
+			break;
+
+		case IPPROTO_ICMPV6:
+			icmp6h = icmp6_hdr(skb);
+			
+			if (icmp6h->icmp6_type == ICMPV6_ECHO_REQUEST) {
+				if (get_outflow_map_port(ntohs(icmp6h->icmp6_identifier), &icmp_list, false, &newp) == -1) {
+#ifdef IVI_DEBUG_MAP
+					printk(KERN_ERR "ivi_v6v6_xmit: fail to perform ivi mapping for id %d (ICMPV6), drop packet.\n", ntohs(icmp6h->icmp6_identifier));
+#endif
+					return 0;
+				} else {
+					newp = htons(newp);
+					csum_replace2(&icmp6h->icmp6_cksum, icmp6h->icmp6_identifier, newp);
+					icmp6h->icmp6_identifier = newp;
+				}
+			} else {
+#ifdef IVI_DEBUG
+				printk(KERN_ERR "ivi_v6v6_xmit: by pass unsupported ICMPV6 type %d in ivi mapping.\n", icmp6h->icmp6_type);
+#endif
+			}
+			
+			break;
+
+		default:
+#ifdef IVI_DEBUG
+			printk(KERN_ERR "ivi_v6v6_xmit: by pass unsupported protocol %d for ivi mapping operation.\n", ip6h->nexthdr);
+#endif
+	}
+
+	return 1;  // Accept on success.
+}
+EXPORT_SYMBOL(ivi_v6v6_xmit);
+
+
 int ivi_v6v4_xmit(struct sk_buff *skb) {
 	struct sk_buff *newskb;
 	struct ethhdr *eth6, *eth4;
@@ -351,8 +463,11 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	struct tcphdr *tcph;
 	struct udphdr *udph;
 	struct icmphdr *icmph;
+	struct icmp6hdr *icmp6h;
 	__u8 *payload;
 	unsigned int hlen, plen;
+	__be16 oldp;
+	bool xlated;
 
 	eth6 = eth_hdr(skb);
 	if (unlikely(eth6->h_proto == __constant_ntohs(ETH_P_IP))) {
@@ -363,8 +478,8 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 
 	ip6h = ipv6_hdr(skb);
 	if (mc_v6_addr(&(ip6h->daddr))) {
-		// By pass ipv6 multicast packet (for ND)
-		printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 multicast packet (possibly ND packet).\n");
+		// By pass ipv6 multicast packet
+		//printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 multicast packet.\n");
 		return -EINVAL;  // Just accept.
 	}
 
@@ -380,8 +495,97 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 		return -EINVAL;  // Just accept.
 	}
 */
-	hlen = sizeof(struct iphdr);
+	
 	plen = ntohs(ip6h->payload_len);
+	
+	/* Prefetch mapped port&id */
+	if (addr_fmt != ADDR_FMT_NONE) {
+		switch (ip6h->nexthdr) {
+			case IPPROTO_TCP:
+				tcph = tcp_hdr(skb);
+				
+				if (get_inflow_tcp_map_port(ntohs(tcph->dest), tcph, plen, &xlated, &oldp) == -1) {
+#ifdef IVI_DEBUG_MAP
+					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for port %d (TCP), drop packet.\n", ntohs(tcph->dest));
+#endif
+					return 0;
+				} else {
+					if (xlated == false) {
+						// Update checksum and we are done.
+						oldp = htons(oldp);
+						csum_replace2(&tcph->check, tcph->dest, oldp);
+						tcph->dest = oldp;
+						return 1;  // Accept on success.
+					} else {
+						tcph->dest = htons(oldp);
+						// More work to do later...
+					}
+				}
+				
+				break;
+
+			case IPPROTO_UDP:
+				udph = udp_hdr(skb);
+				
+				if (get_inflow_map_port(ntohs(udph->dest), &udp_list, &xlated, &oldp) == -1) {
+#ifdef IVI_DEBUG_MAP
+					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for port %d (UDP), drop packet.\n", ntohs(udph->dest));
+#endif
+					return 0;
+				} else {
+					if (xlated == false) {
+						// Update checksum and we are done.
+						oldp = htons(oldp);
+						csum_replace2(&udph->check, udph->dest, oldp);
+						udph->dest = oldp;
+						return 1;  // Accept on success.
+					} else {
+						udph->dest = htons(oldp);
+						// More work to do later...
+					}
+				}
+				
+				break;
+
+			case IPPROTO_ICMPV6:
+				icmp6h = icmp6_hdr(skb);
+			
+				if (icmp6h->icmp6_type == ICMPV6_ECHO_REPLY) {
+					if (get_inflow_map_port(ntohs(icmp6h->icmp6_identifier), &icmp_list, &xlated, &oldp) == -1) {
+#ifdef IVI_DEBUG_MAP
+						printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for id %d (ICMP), drop packet.\n", ntohs(icmp6h->icmp6_identifier));
+#endif
+						return 0;
+					} else {
+						if (xlated == false) {
+							// Update checksum and we are done.
+							oldp = htons(oldp);
+							csum_replace2(&icmp6h->icmp6_cksum, icmp6h->icmp6_identifier, oldp);
+							icmp6h->icmp6_identifier = oldp;
+							return 1;  // Accept on success.
+						} else {
+							icmp6h->icmp6_identifier = htons(oldp);
+							// More work to do later...
+						}
+					}
+				} else {
+#ifdef IVI_DEBUG
+					printk(KERN_ERR "ivi_v6v4_xmit: by pass unsupported ICMPV6 type %d in ivi mapping.\n", icmp6h->icmp6_type);
+#endif
+					return -EINVAL;
+				}
+			
+				break;
+
+			default:
+#ifdef IVI_DEBUG
+				printk(KERN_ERR "ivi_v6v4_xmit: by pass unsupported protocol %d for ivi mapping operation.\n", ip6h->nexthdr);
+#endif
+				return -EINVAL;
+		}
+	}
+
+	hlen = sizeof(struct iphdr);
 	if (!(newskb = dev_alloc_skb(2 + ETH_HLEN + hlen + plen))) {
 		printk(KERN_ERR "ivi_v6v4_xmit: failed to allocate new socket buffer.\n");
 		return 0;  // Drop packet on low memory
@@ -416,18 +620,6 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 			skb_copy_bits(skb, 40, payload, plen);
 			tcph = (struct tcphdr *)payload;
 
-			if (addr_fmt != ADDR_FMT_NONE) {
-				__be16 oldp;
-
-				if (get_inflow_tcp_map_port(ntohs(tcph->dest), tcph, plen, &oldp) == -1) {
-					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for port %d (TCP).\n", ntohs(tcph->dest));
-					kfree_skb(newskb);
-					return 0;
-				} else {
-					tcph->dest = htons(oldp);
-				}
-			}
-
 			if (tcph->syn && (tcph->doff > 5)) {
 				__u16 *option = (__u16*)tcph;
 				if (option[10] == htons(0x0204)) {
@@ -444,19 +636,6 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 		case IPPROTO_UDP:
 			skb_copy_bits(skb, 40, payload, plen);
 			udph = (struct udphdr *)payload;
-
-			if (addr_fmt != ADDR_FMT_NONE) {
-				__be16 oldp;
-
-				if (get_inflow_map_port(ntohs(udph->dest), &udp_list, &oldp) == -1) {
-					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for port %d (UDP).\n", ntohs(udph->dest));
-					kfree_skb(newskb);
-					return 0;
-				} else {
-					udph->dest = htons(oldp);
-				}
-			}
-
 			udph->check = 0;
 			udph->check = csum_tcpudp_magic(ip4h->saddr, ip4h->daddr, plen, IPPROTO_UDP, csum_partial(payload, plen, 0));
 			break;
@@ -465,27 +644,11 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 			skb_copy_bits(skb, 40, payload, plen);
 			icmph = (struct icmphdr *)payload;
 
-			if (icmph->type == ICMPV6_ECHO_REQUEST || icmph->type == ICMPV6_ECHO_REPLY) {
-				icmph->type = (icmph->type == ICMPV6_ECHO_REQUEST) ? ICMP_ECHO : ICMP_ECHOREPLY;
+			if (icmph->type == ICMPV6_ECHO_REPLY) {
+				icmph->type = ICMP_ECHOREPLY;
 				ip4h->protocol = IPPROTO_ICMP;
-
-				if (addr_fmt != ADDR_FMT_NONE) {
-					__be16 oldp;
-
-					if (get_inflow_map_port(ntohs(icmph->un.echo.id), &icmp_list, &oldp) == -1) {
-						printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for id %d (ICMP).\n", ntohs(icmph->un.echo.id));
-						kfree_skb(newskb);
-						return 0;
-					} else {
-						icmph->un.echo.id = htons(oldp);
-					}
-				}
-
 				icmph->checksum = 0;
 				icmph->checksum = ip_compute_csum(icmph, plen);
-			} else {
-				printk(KERN_DEBUG "ivi_v6v4_xmit: unsupported ICMPv6 type %d in xlate (possibly ND packet). By pass.\n", icmph->type);
-				return -EINVAL;
 			}
 
 			break;
