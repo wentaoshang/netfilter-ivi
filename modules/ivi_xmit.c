@@ -52,8 +52,8 @@ EXPORT_SYMBOL(v6prefix);
 __be32 v6prefixlen = 8;  // "/64" ivi prefix length in bytes (8)
 EXPORT_SYMBOL(v6prefixlen);
 
-__u8 addr_fmt = 0;  // ivi translated address format
-EXPORT_SYMBOL(addr_fmt);
+__u8 local_fmt = 0;  // ivi translated address format
+EXPORT_SYMBOL(local_fmt);
 
 __u16 mss_limit = 1440;  // max mss supported
 EXPORT_SYMBOL(mss_limit);
@@ -92,10 +92,14 @@ static int addr_is_v6host(const struct in6_addr *addr) {
 	return (embed == v4addr);
 }
 
-static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _local) {
+static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, u8 _local) {
 	int prefixlen;
-	u32 addr = ntohl(*v4addr);
-	u8 fmt = 0;
+	u32 addr;
+	u16 ratio, adjacent, offset, suffix;
+	u8 fmt;
+	
+	addr = ntohl(*v4addr);
+	ratio = adjacent = offset = suffix = fmt = 0;
 	
 	memset(v6addr, 0, sizeof(struct in6_addr));
 
@@ -103,15 +107,24 @@ static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _local)
 		// Fast path for local address translation
 		prefixlen = v6prefixlen;
 		memcpy(v6addr, v6prefix, prefixlen);
-		fmt = addr_fmt;
+		fmt = local_fmt;
+		ratio = local_ratio;
+		offset = local_offset;
+		suffix = local_suffix;
 	} else {
-		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &fmt) != 0) {
+		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &ratio, &adjacent, &fmt) != 0) {
 #ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
 #endif
 			return -1;
 		}
-		prefixlen /= 8; /* counted in bytes */
+		prefixlen = prefixlen >> 3; /* counted in bytes */
+		if (fmt != ADDR_FMT_NONE && ratio && adjacent) {
+			offset = (port / ratio) % adjacent;
+			suffix = fls(ratio) - 1;
+			suffix = suffix << 12;
+			suffix += offset & 0x0fff;
+		}
 	}
 	
 	v6addr->s6_addr[prefixlen] = (unsigned char)(addr >> 24);
@@ -130,11 +143,13 @@ static int ipaddr_4to6(unsigned int *v4addr, struct in6_addr *v6addr, u8 _local)
 	return 0;
 }
 
-static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u8 _local) {
+static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio, u16 *adjacent, u16 *offset, u8 _local) {
 	u32 addr;
 	int prefixlen;
+	u8 fmt;
 
 	addr = 0;
+	fmt = 0;
 
 	if (link_local_addr(v6addr)) {
 		// Do not translate ipv6 link local address.
@@ -148,13 +163,13 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u8 _local)
 		// Fast path for local address translation
 		prefixlen = v6prefixlen;
 	} else {
-		if (ivi_rule6_lookup(v6addr, &prefixlen) != 0) {
+		if (ivi_rule6_lookup(v6addr, &prefixlen, ratio, adjacent, &fmt) != 0) {
 #ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
 #endif
 			return -1;
 		}
-		prefixlen /= 8; /* counted in bytes */
+		prefixlen = prefixlen >> 3; /* counted in bytes */
 	}
 	
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen]) << 24;
@@ -162,6 +177,18 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u8 _local)
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 2]) << 8;
 	addr |= ((unsigned int)v6addr->s6_addr[prefixlen + 3]);
 	*v4addr = htonl(addr);
+
+	if (offset) {
+		/* offset is obtained from ipv6 address */
+		if (fmt == ADDR_FMT_POSTFIX) {
+			*offset = ntohs(v6addr->s6_addr16[7]);
+		} else if (fmt == ADDR_FMT_SUFFIX) {
+			*offset = ((v6addr->s6_addr[prefixlen + 4] << 8) + v6addr->s6_addr[prefixlen + 5]) & 0x0fff;
+		} else {
+			// No port multiplex
+			*offset = 0;
+		}
+	}
 	
 	return 0;
 }
@@ -178,6 +205,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	struct icmp6hdr *icmp6h;
 	__u8 *payload;
 	unsigned int hlen, plen, ll_rs;
+	u16 newp, s_port, d_port;
 	
 	//struct rt6_info *rt;
 	
@@ -201,16 +229,15 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	}
 
 	plen = htons(ip4h->tot_len) - (ip4h->ihl * 4);
+	s_port = d_port = newp = 0;
 	
-	if (addr_fmt != ADDR_FMT_NONE) {
-		__be16 newp;
-		
+	if (local_fmt != ADDR_FMT_NONE) {
 		payload = (__u8 *)(ip4h) + (ip4h->ihl << 2);
 		switch (ip4h->protocol) {
 			case IPPROTO_TCP:
 				tcph = (struct tcphdr *)payload;
 				
-				if (get_outflow_tcp_map_port(ntohs(tcph->source), tcph, plen, true, &newp) == -1) {
+				if (get_outflow_tcp_map_port(ntohs(tcph->source), local_ratio, local_adjacent, local_offset, tcph, plen, true, &newp) == -1) {
 #ifdef IVI_DEBUG_MAP
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for port %d (TCP).\n", ntohs(tcph->source));
 #endif
@@ -219,12 +246,15 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					tcph->source = htons(newp);
 				}
 				
+				s_port = ntohs(tcph->source);
+				d_port = ntohs(tcph->dest);
+				
 				break;
 			
 			case IPPROTO_UDP:
 				udph = (struct udphdr *)payload;
 				
-				if (get_outflow_map_port(ntohs(udph->source), &udp_list, true, &newp) == -1) {
+				if (get_outflow_map_port(&udp_list, ntohs(udph->source), local_ratio, local_adjacent, local_offset, true, &newp) == -1) {
 #ifdef IVI_DEBUG_MAP
 					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for port %d (UDP).\n", ntohs(udph->source));
 #endif
@@ -233,13 +263,16 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					udph->source = htons(newp);
 				}
 				
+				s_port = ntohs(udph->source);
+				d_port = ntohs(udph->dest);
+				
 				break;
 				
 			case IPPROTO_ICMP:
 				icmph = (struct icmphdr *)payload;
 				
 				if (icmph->type == ICMP_ECHO) {
-					if (get_outflow_map_port(ntohs(icmph->un.echo.id), &icmp_list, true, &newp) == -1) {
+					if (get_outflow_map_port(&icmp_list, ntohs(icmph->un.echo.id), local_ratio, local_adjacent, local_offset, true, &newp) == -1) {
 #ifdef IVI_DEBUG_MAP
 						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform ivi mapping for id %d (ICMP).\n", ntohs(icmph->un.echo.id));
 #endif
@@ -249,10 +282,12 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 					}
 				} else {
 #ifdef IVI_DEBUG
-					printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type in ivi mapping. Drop packet now.\n");
+					printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type %d in ivi mapping. Drop packet.\n", icmph->type);
 #endif
 					return 0;
 				}
+
+				s_port = d_port = ntohs(icmph->un.echo.id);
 				
 				break;
 			
@@ -273,12 +308,12 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	skb_reserve(newskb, ll_rs);
 
 	ip6h = (struct ipv6hdr *)skb_put(newskb, hlen);
-	if (ipaddr_4to6(&(ip4h->saddr), &(ip6h->saddr), 1) != 0) {
+	if (ipaddr_4to6(&(ip4h->saddr), s_port, &(ip6h->saddr), 1) != 0) {
 		kfree_skb(newskb);
 		return 0;
 	}
 
-	if (ipaddr_4to6(&(ip4h->daddr), &(ip6h->daddr), 0) != 0) {
+	if (ipaddr_4to6(&(ip4h->daddr), d_port, &(ip6h->daddr), 0) != 0) {
 		kfree_skb(newskb);
 		return 0;
 	}
@@ -393,7 +428,7 @@ int ivi_v6v6_xmit(struct sk_buff *skb) {
 		case IPPROTO_TCP:
 			tcph = tcp_hdr(skb);
 
-			if (get_outflow_tcp_map_port(ntohs(tcph->source), tcph, ntohs(ip6h->payload_len), false, &newp) == -1) {
+			if (get_outflow_tcp_map_port(ntohs(tcph->source), local_ratio, local_adjacent, local_offset, tcph, ntohs(ip6h->payload_len), false, &newp) == -1) {
 #ifdef IVI_DEBUG_MAP
 				printk(KERN_ERR "ivi_v6v6_xmit: fail to perform ivi mapping for port %d (TCP), drop packet.\n", ntohs(tcph->source));
 #endif
@@ -409,7 +444,7 @@ int ivi_v6v6_xmit(struct sk_buff *skb) {
 		case IPPROTO_UDP:
 			udph = udp_hdr(skb);
 
-			if (get_outflow_map_port(ntohs(udph->source), &udp_list, false, &newp) == -1) {
+			if (get_outflow_map_port(&udp_list, ntohs(udph->source), local_ratio, local_adjacent, local_offset, false, &newp) == -1) {
 #ifdef IVI_DEBUG_MAP
 				printk(KERN_ERR "ivi_v6v6_xmit: fail to perform ivi mapping for port %d (UDP), drop packet.\n", ntohs(udph->source));
 #endif
@@ -426,7 +461,7 @@ int ivi_v6v6_xmit(struct sk_buff *skb) {
 			icmp6h = icmp6_hdr(skb);
 			
 			if (icmp6h->icmp6_type == ICMPV6_ECHO_REQUEST) {
-				if (get_outflow_map_port(ntohs(icmp6h->icmp6_identifier), &icmp_list, false, &newp) == -1) {
+				if (get_outflow_map_port(&icmp_list, ntohs(icmp6h->icmp6_identifier), local_ratio, local_adjacent, local_offset, false, &newp) == -1) {
 #ifdef IVI_DEBUG_MAP
 					printk(KERN_ERR "ivi_v6v6_xmit: fail to perform ivi mapping for id %d (ICMPV6), drop packet.\n", ntohs(icmp6h->icmp6_identifier));
 #endif
@@ -499,7 +534,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	plen = ntohs(ip6h->payload_len);
 	
 	/* Prefetch mapped port&id */
-	if (addr_fmt != ADDR_FMT_NONE) {
+	if (local_fmt != ADDR_FMT_NONE) {
 		switch (ip6h->nexthdr) {
 			case IPPROTO_TCP:
 				tcph = tcp_hdr(skb);
@@ -527,7 +562,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 			case IPPROTO_UDP:
 				udph = udp_hdr(skb);
 				
-				if (get_inflow_map_port(ntohs(udph->dest), &udp_list, &xlated, &oldp) == -1) {
+				if (get_inflow_map_port(&udp_list, ntohs(udph->dest), &xlated, &oldp) == -1) {
 #ifdef IVI_DEBUG_MAP
 					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for port %d (UDP), drop packet.\n", ntohs(udph->dest));
 #endif
@@ -551,7 +586,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				icmp6h = icmp6_hdr(skb);
 			
 				if (icmp6h->icmp6_type == ICMPV6_ECHO_REPLY) {
-					if (get_inflow_map_port(ntohs(icmp6h->icmp6_identifier), &icmp_list, &xlated, &oldp) == -1) {
+					if (get_inflow_map_port(&icmp_list, ntohs(icmp6h->icmp6_identifier), &xlated, &oldp) == -1) {
 #ifdef IVI_DEBUG_MAP
 						printk(KERN_ERR "ivi_v6v4_xmit: fail to perform ivi mapping for id %d (ICMP), drop packet.\n", ntohs(icmp6h->icmp6_identifier));
 #endif
@@ -597,12 +632,12 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	memcpy(eth4, eth6, 12);
 	eth4->h_proto  = __constant_ntohs(ETH_P_IP);
 	ip4h = (struct iphdr *)skb_put(newskb, hlen);
-	if (ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), 0) != 0) {
+	if (ipaddr_6to4(&(ip6h->saddr), &(ip4h->saddr), NULL, NULL, NULL, 0) != 0) {
 		kfree_skb(newskb);
 		return -EINVAL;  // Address translation failed, just accept.
 	}
 
-	if (ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), 1) != 0) {
+	if (ipaddr_6to4(&(ip6h->daddr), &(ip4h->daddr), NULL, NULL, NULL, 1) != 0) {
 		kfree_skb(newskb);
 		return -EINVAL;  // Address translation failed, just accept.
 	}

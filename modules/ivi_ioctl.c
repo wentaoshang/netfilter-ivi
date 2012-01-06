@@ -27,7 +27,6 @@
 
 static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, unsigned long arg) {
 	int retval = 0;
-	__be16 tmp;
 	struct rule_info rule;
 	
 	switch (cmd) {
@@ -71,46 +70,41 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			break;
 
 		case IVI_IOC_ADJACENT:
-			if (copy_from_user(&adjacent, (__be16 *)arg, sizeof(__be16)) > 0) {
+			if (copy_from_user(&local_adjacent, (__be16 *)arg, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: adjacent set to %d.\n", adjacent);
+			printk(KERN_INFO "ivi_ioctl: adjacent set to %d.\n", local_adjacent);
 			break;
 		
 		case IVI_IOC_POSTFIX:
-			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
+			if (copy_from_user(&local_ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", ratio);
-			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
+			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", local_ratio);
+			if (copy_from_user(&local_offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", offset);
-			addr_fmt = ADDR_FMT_POSTFIX;
-			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
+			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", local_offset);
+			local_fmt = ADDR_FMT_POSTFIX;
+			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", local_fmt);
 			break;
 
 		case IVI_IOC_SUFFIX:
-			if (copy_from_user(&ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
+			if (copy_from_user(&local_ratio, (__be16 *)arg, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", ratio);
-			if (copy_from_user(&offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
+			printk(KERN_INFO "ivi_ioctl: ratio set to %d.\n", local_ratio);
+			if (copy_from_user(&local_offset, ((__be16 *)arg) + 1, sizeof(__be16)) > 0) {
 				return -EACCES;
 			}
-			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", offset);
+			printk(KERN_INFO "ivi_ioctl: offset set to %d.\n", local_offset);
 			
-			suffix = 0;
-			tmp = ratio;
-			while (tmp >> 1 != 0) {
-				suffix++;
-				tmp = tmp >> 1;
-			}
-			suffix = suffix << 12;
-			suffix += offset & 0x0fff;
-			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", suffix);
-			addr_fmt = ADDR_FMT_SUFFIX;
-			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", addr_fmt);
+			local_suffix = fls(local_ratio) - 1;
+			local_suffix = local_suffix << 12;
+			local_suffix += local_offset & 0x0fff;
+			printk(KERN_INFO "ivi_ioctl: suffix set to %04x.\n", local_suffix);
+			local_fmt = ADDR_FMT_SUFFIX;
+			printk(KERN_INFO "ivi_ioctl: addr_fmt set to %d.\n", local_fmt);
 			break;
 
 		case IVI_IOC_MSS_LIMIT:
@@ -119,23 +113,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 			}
 			printk(KERN_INFO "ivi_ioctl: mss limit set to %d.\n", mss_limit);
 			break;
-/*
-		case IVI_IOC_PD_DEFAULT:
-			if (copy_from_user(v6default, (__u8 *)arg, 16) > 0) {
-				return -EACCES;
-			}
-			printk(KERN_INFO "ivi_ioctl: default pd prefix set to %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x.\n", 
-				ntohs(((__be16 *)v6default)[0]), ntohs(((__be16 *)v6default)[1]), ntohs(((__be16 *)v6default)[2]), ntohs(((__be16 *)v6default)[3]), 
-				ntohs(((__be16 *)v6default)[4]), ntohs(((__be16 *)v6default)[5]), ntohs(((__be16 *)v6default)[6]), ntohs(((__be16 *)v6default)[7]));
-			break;
-		
-		case IVI_IOC_PD_DEFAULT_LEN:
-			if (copy_from_user(&v6defaultlen, (__be32 *)arg, sizeof(__be32)) > 0) {
-				return -EACCES;
-			}
-			printk(KERN_INFO "ivi_ioctl: default pd prefix length set to %d.\n", v6defaultlen);
-			break;
-*/
+
 		case IVI_IOC_ADD_RULE:
 			if (copy_from_user(&rule, (void *)arg, sizeof(struct rule_info)) > 0) {
 				return -EACCES;

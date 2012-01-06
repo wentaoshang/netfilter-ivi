@@ -57,10 +57,10 @@ __inline int port_hashfn(__be16 port)
 #endif
 
 /* global map list variables */
-extern __be16 ratio;
-extern __be16 offset;
-extern __be16 suffix;
-extern __be16 adjacent;
+extern u16 local_ratio;
+extern u16 local_offset;
+extern u16 local_suffix;
+extern u16 local_adjacent;
 
 extern struct map_list udp_list;
 extern struct map_list icmp_list;
@@ -71,7 +71,7 @@ extern void refresh_map_list(struct map_list *list);
 extern void free_map_list(struct map_list *list);
 
 /* mapping operations */
-extern int get_outflow_map_port(__be16 oldp, struct map_list *list, bool xlated, __be16 *newp);
-extern int get_inflow_map_port(__be16 newp, struct map_list *list, bool *xlated, __be16 *oldp);
+extern int get_outflow_map_port(struct map_list *list, __be16 oldp, u16 ratio, u16 adjacent, u16 offset, bool xlated, __be16 *newp);
+extern int get_inflow_map_port(struct map_list *list, __be16 newp, bool *xlated, __be16 *oldp);
 
 #endif /* IVI_MAP_H */
