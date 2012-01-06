@@ -18,17 +18,17 @@ EXPORT_SYMBOL(icmp_list);
 
 
 /* ratio and offset together indicate the port pool range */
-__be16 ratio = 1;
-EXPORT_SYMBOL(ratio);
+u16 local_ratio = 1;
+EXPORT_SYMBOL(local_ratio);
 
-__be16 offset = 0;
-EXPORT_SYMBOL(offset);
+u16 local_offset = 0;
+EXPORT_SYMBOL(local_offset);
 
-__be16 suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
-EXPORT_SYMBOL(suffix);
+u16 local_suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
+EXPORT_SYMBOL(local_suffix);
 
-__be16 adjacent = 1;
-EXPORT_SYMBOL(adjacent);
+u16 local_adjacent = 1;
+EXPORT_SYMBOL(local_adjacent);
 
 /* list operations */
 
@@ -165,7 +165,7 @@ EXPORT_SYMBOL(free_map_list);
 /* mapping operations */
 
 // Get mapped port for outflow packet, input and output are in host byte order, return -1 if failed
-int get_outflow_map_port(__be16 oldp, struct map_list *list, bool xlated, __be16 *newp)
+int get_outflow_map_port(struct map_list *list, __be16 oldp, u16 ratio, u16 adjacent, u16 offset, bool xlated, __be16 *newp)
 {
 	__be16 retport;
 	int hash;
@@ -271,7 +271,7 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, bool xlated, __be16
 EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
-int get_inflow_map_port(__be16 newp, struct map_list *list, bool *xlated, __be16 *oldp)
+int get_inflow_map_port(struct map_list *list, __be16 newp, bool *xlated, __be16 *oldp)
 {
 	struct map_tuple *iter;
 	struct hlist_node *temp;
@@ -418,7 +418,7 @@ EXPORT_SYMBOL(free_map_list);
 /* mapping operations */
 
 // Get mapped port for outflow packet, input and output are in host byte order, return -1 if failed
-int get_outflow_map_port(__be16 oldp, struct map_list *list, bool xlated, __be16 *newp)
+int get_outflow_map_port(struct map_list *list, __be16 oldp, u16 ratio, u16 adjacent, u16 offset, bool xlated, __be16 *newp)
 {
 	__be16 retport;
 	
@@ -520,7 +520,7 @@ int get_outflow_map_port(__be16 oldp, struct map_list *list, bool xlated, __be16
 EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
-int get_inflow_map_port(__be16 newp, struct map_list *list, bool *xlated, __be16 *oldp)
+int get_inflow_map_port(struct map_list *list, __be16 newp, bool *xlated, __be16 *oldp)
 {
 	struct map_tuple *iter;
 	int ret = -1;

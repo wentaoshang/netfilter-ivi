@@ -54,7 +54,7 @@ extern void refresh_tcp_map_list(void);
 extern void free_tcp_map_list(void);
 
 /* mapping operations */
-extern int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp);
+extern int get_outflow_tcp_map_port(__be16 oldp, u16 ratio, u16 adjacent, u16 offset, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp);
 extern int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, bool *xlated, __be16 *oldp);
 
 #endif /* IVI_MAP_TCP_H */

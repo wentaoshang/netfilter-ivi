@@ -882,7 +882,7 @@ static __inline int tcp_port_in_use(__be16 port)
 	return ret;
 }
 
-int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp)
+int get_outflow_tcp_map_port(__be16 oldp, u16 ratio, u16 adjacent, u16 offset, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp)
 {
 	__be16 retport = 0;
 	int hash;
@@ -1198,7 +1198,7 @@ static __inline int tcp_port_in_use(__be16 port)
 	return ret;
 }
 
-int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp)
+int get_outflow_tcp_map_port(__be16 oldp, u16 ratio, u16 adjacent, u16 offset, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp)
 {
 	__be16 retport = 0;
 	

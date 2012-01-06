@@ -34,10 +34,8 @@ extern __be32 v4addr;
 extern __be32 v4mask;
 extern __u8 v6prefix[16];
 extern __be32 v6prefixlen;
-//extern __u8 v6default[16];
-//extern __be32 v6defaultlen;
 
-extern __u8 addr_fmt;
+extern __u8 local_fmt;
 
 extern __u16 mss_limit;
 
