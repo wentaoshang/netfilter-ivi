@@ -9,6 +9,84 @@
 
 #include "ivi_map_tcp.h"
 
+#define SECS * HZ
+#define MINS * 60 SECS
+#define HOURS * 60 MINS
+#define DAYS * 24 HOURS
+
+// Packet flow direction
+typedef enum _PACKET_DIR {
+	PACKET_DIR_LOCAL = 0,  // Sent from local to remote
+	PACKET_DIR_REMOTE,     // Sent from remote to local
+	PACKET_DIR_MAX
+} PACKET_DIR, *PPACKET_DIR;
+
+
+typedef enum _TCP_STATUS {
+	TCP_STATUS_NONE = 0,      // Initial state: 0
+	TCP_STATUS_SYN_SENT,      // SYN only packet sent: 1
+	TCP_STATUS_SYN_RECV,      // SYN-ACK packet sent: 2
+	TCP_STATUS_ESTABLISHED,   // ACK packet sent: 3
+	TCP_STATUS_FIN_WAIT,      // FIN packet sent: 4
+	TCP_STATUS_CLOSE_WAIT,    // ACK sent after FIN received: 5
+	TCP_STATUS_LAST_ACK,      // FIN sent after FIN received: 6
+	TCP_STATUS_TIME_WAIT,     // Last ACK sent: 7
+	TCP_STATUS_CLOSE,         // Connection closed: 8
+	TCP_STATUS_SYN_SENT2,     // SYN only packet received after SYN sent, simultaneous open: 9
+	TCP_STATUS_MAX,
+	TCP_STATUS_IGNORE
+} TCP_STATUS, *PTCP_STATUS;
+
+#define STATE_OPTION_WINDOW_SCALE      0x01    // Sender uses windows scale
+#define STATE_OPTION_SACK_PERM         0x02    // Sender allows SACK option
+#define STATE_OPTION_CLOSE_INIT        0x04    // Sender sent Fin first
+#define STATE_OPTION_DATA_UNACK        0x10    // Has unacknowledged data
+#define STATE_OPTION_MAXACK_SET        0x20    // MaxAck in sender state info has been set. 
+                                               // This flag is set when we see the first non-zero
+                                               // ACK in TCP header sent by the sender.
+
+typedef enum _FILTER_STATUS {
+	FILTER_ACCEPT = 0,    // Everything is good, let the packet pass
+	FILTER_DROP,          // Packet is invalid, but the state is not tainted
+	FILTER_DROP_CLEAN     // Both packet and state is invalid
+} FILTER_STATUS, *PFILTER_STATUS;
+
+typedef struct _TCP_STATE_INFO {
+	u_int32_t  End;
+	u_int32_t  MaxEnd;
+	u_int32_t  MaxWindow;
+	u_int32_t  MaxAck;
+	u_int8_t   Scale;
+	u_int8_t   Options;
+} TCP_STATE_INFO, *PTCP_STATE_INFO;
+
+typedef struct _TCP_STATE_CONTEXT {
+#ifdef IVI_HASH
+	struct hlist_node out_node;  // Inserted to out_chain
+	struct hlist_node in_node;   // Inserted to in_chain
+#else
+	struct list_head  node;
+#endif
+	// Indexes pointing back to port hash table
+	__be16            oldport;
+	__be16            newport;
+	bool              xlated;
+
+	// TCP state info
+	TCP_STATE_INFO    Seen[PACKET_DIR_MAX];     // Seen[0] for local state, Seen[1] for remote state
+	struct timeval    StateSetTime;    // The time when the current state is set
+	unsigned int      StateTimeOut;    // Timeout value for the current state
+	TCP_STATUS        Status;
+	// For detecting retransmitted packets
+	PACKET_DIR        LastDir;
+	u_int8_t          RetransCount;
+	u_int8_t          LastControlBits;
+	u_int32_t         LastWindow;
+	u_int32_t         LastSeq;
+	u_int32_t         LastAck;
+	u_int32_t         LastEnd;
+} TCP_STATE_CONTEXT, *PTCP_STATE_CONTEXT;
+
 // TCP timeouts
 static unsigned int tcp_timeouts[TCP_STATUS_MAX] __read_mostly = {
 	0,        // TCP_STATUS_NONE
@@ -746,8 +824,8 @@ void refresh_tcp_map_list(void)
 				hlist_del(&iter->in_node);
 				tcp_list.size--;
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "refresh_tcp_map_list: time out map %d -> %d on out_chain[%d], TCP state %d\n", 
-						iter->oldport, iter->newport, i, iter->Status);
+				printk(KERN_DEBUG "refresh_tcp_map_list: time out map %d -> %d on out_chain[%d], TCP state %d, xlated = %d\n", 
+						iter->oldport, iter->newport, i, iter->Status, iter->xlated);
 #endif
 				kfree(iter);
 			}
@@ -773,8 +851,8 @@ void free_tcp_map_list(void)
 			hlist_del(&iter->in_node);
 			tcp_list.size--;
 #ifdef IVI_DEBUG_MAP
-			printk(KERN_DEBUG "free_tcp_map_list: delete map %d -> %d on out_chain[%d], TCP state %d\n", 
-				iter->oldport, iter->newport, i, iter->Status);
+			printk(KERN_DEBUG "free_tcp_map_list: delete map %d -> %d on out_chain[%d], TCP state %d, xlated = %d\n", 
+				iter->oldport, iter->newport, i, iter->Status, iter->xlated);
 #endif
 			kfree(iter);
 		}
@@ -804,7 +882,7 @@ static __inline int tcp_port_in_use(__be16 port)
 	return ret;
 }
 
-int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *newp)
+int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp)
 {
 	__be16 retport = 0;
 	int hash;
@@ -813,6 +891,9 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 	FILTER_STATUS ftState;
 
 	refresh_tcp_map_list();
+
+	if (!newp)
+		return -1;
 	
 	*newp = 0;
 	
@@ -820,7 +901,9 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
     
 	if (tcp_list.size >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&tcp_list.lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_INFO "get_outflow_tcp map_port: map list full.\n");
+#endif
 		return -1;
 	}
 
@@ -838,22 +921,22 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
                 		if (ftState == FILTER_ACCEPT) {
 					retport = StateContext->newport;
 #ifdef IVI_DEBUG_MAP
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map %d -> %d on out_chain[%d], TCP state %d\n", 
-						StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map %d -> %d on out_chain[%d], TCP state %d, xlated = %d\n", 
+						StateContext->oldport, StateContext->newport, hash, StateContext->Status, StateContext->xlated);
 #endif
 				}
 				else if (ftState == FILTER_DROP) {
 					// Return -1 to drop current segment, keep the state info.
 #ifdef IVI_DEBUG_MAP
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map %d -> %d on out_chain[%d], TCP state %d\n", 
-						StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map %d -> %d on out_chain[%d], TCP state %d, xlated = %d\n", 
+						StateContext->oldport, StateContext->newport, hash, StateContext->Status, StateContext->xlated);
 #endif
 				}
 				else  // FILTER_DROP_CLEAN
 				{
 #ifdef IVI_DEBUG_MAP
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map %d -> %d on out_chain[%d], TCP state %d\n", 
-						StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map %d -> %d on out_chain[%d], TCP state %d, xlated = %d\n", 
+						StateContext->oldport, StateContext->newport, hash, StateContext->Status, StateContext->xlated);
 #endif
 					// Remove state info, return -1
 					hlist_del(&StateContext->out_node);
@@ -910,7 +993,9 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&tcp_list.lock);
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_INFO "get_outflow_tcp_map_port: failed to assign a new map port for %d\n", oldp);
+#endif
 				return -1;
 			}
 		}
@@ -944,6 +1029,7 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 		// Routine to add new map-info
 		StateContext->oldport = oldp;
 		StateContext->newport = retport;
+		StateContext->xlated = xlated;
 		hash = port_hashfn(oldp);
 		hlist_add_head(&StateContext->out_node, &tcp_list.out_chain[hash]);
 		hash = port_hashfn(retport);
@@ -951,8 +1037,8 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 		tcp_list.size++;
 		tcp_list.last_alloc = retport;
 #ifdef IVI_DEBUG_MAP
-		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map %d -> %d added, TCP state %d\n", 
-			StateContext->oldport, StateContext->newport, StateContext->Status);
+		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map %d -> %d added, TCP state %d, xlated = %d\n", 
+			StateContext->oldport, StateContext->newport, StateContext->Status, StateContext->xlated);
 #endif
 	}
 	
@@ -964,7 +1050,7 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 }
 EXPORT_SYMBOL(get_outflow_tcp_map_port);
 
-int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be16 *oldp)
+int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, bool *xlated, __be16 *oldp)
 {
 	FILTER_STATUS       ftState;
 	PTCP_STATE_CONTEXT  StateContext = NULL;
@@ -975,15 +1061,21 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be16 *o
 	ret = -1;
 	
 	refresh_tcp_map_list();
+
+	if (!xlated || !oldp)
+		return -1;
 	
 	*oldp = 0;
+	*xlated = false;
 	
 	spin_lock_bh(&tcp_list.lock);
 
 	hash = port_hashfn(newp);
 	if (hlist_empty(&tcp_list.in_chain[hash])) {
 		spin_unlock_bh(&tcp_list.lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_INFO "get_inflow_tcp_map_port: in_chain[%d] empty.\n", hash);
+#endif
 		return -1;
 	}
 	
@@ -995,24 +1087,25 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be16 *o
 			
 			if (ftState == FILTER_ACCEPT) {
 				*oldp = StateContext->oldport;
+				*xlated = StateContext->xlated;
 				ret = 0;
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Found map %d -> %d on in_chain[%d], TCP state %d\n", 
-					StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Found map %d -> %d on in_chain[%d], TCP state %d, xlated = %d\n", 
+					StateContext->oldport, StateContext->newport, hash, StateContext->Status, StateContext->xlated);
 #endif
 			}
 			else if (ftState == FILTER_DROP) {
 				// Return -1 to drop current segment but keep the state info.
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid packet on map %d -> %d on in_chain[%d], TCP state %d\n", 
-					StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid packet on map %d -> %d on in_chain[%d], TCP state %d, xlated = %d\n", 
+					StateContext->oldport, StateContext->newport, hash, StateContext->Status, StateContext->xlated);
 #endif
 			}
 			else  // FILTER_DROP_CLEAN
 			{
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid state on map %d -> %d on in_chain[%d], TCP state %d\n", 
-					StateContext->oldport, StateContext->newport, hash, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid state on map %d -> %d on in_chain[%d], TCP state %d, xlated = %d\n", 
+					StateContext->oldport, StateContext->newport, hash, StateContext->Status, StateContext->xlated);
 #endif
 				// Remove state info and return -1 to drop current segment
 				hlist_del(&StateContext->out_node);
@@ -1057,7 +1150,8 @@ void refresh_tcp_map_list(void)
 			list_del(&iter->node);
 			tcp_list.size--;
 #ifdef IVI_DEBUG_MAP
-			printk(KERN_DEBUG "refresh_tcp_map_list: map %d -> %d time out on TCP state %d\n", iter->oldport, iter->newport, iter->Status);
+			printk(KERN_DEBUG "refresh_tcp_map_list: map %d -> %d time out on TCP state %d, xlated = %d\n", 
+					iter->oldport, iter->newport, iter->Status, iter->xlated);
 #endif
 			kfree(iter);
 		}
@@ -1077,7 +1171,8 @@ void free_tcp_map_list(void)
 		list_del(&iter->node);
 		tcp_list.size--;
 #ifdef IVI_DEBUG_MAP
-		printk(KERN_DEBUG "free_tcp_map_list: map %d -> %d deleted on TCP state %d\n", iter->oldport, iter->newport, iter->Status);
+		printk(KERN_DEBUG "free_tcp_map_list: map %d -> %d deleted on TCP state %d, xlated = %d\n", 
+				iter->oldport, iter->newport, iter->Status, iter->xlated);
 #endif
 		kfree(iter);
 	}
@@ -1103,7 +1198,7 @@ static __inline int tcp_port_in_use(__be16 port)
 	return ret;
 }
 
-int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *newp)
+int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, bool xlated, __be16 *newp)
 {
 	__be16 retport = 0;
 	
@@ -1111,6 +1206,9 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 	FILTER_STATUS ftState;
 
 	refresh_tcp_map_list();
+
+	if (!newp)
+		return -1;
 	
 	*newp = 0;
 	
@@ -1118,7 +1216,9 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
     
 	if (tcp_list.size >= (int)(64513 / ratio)) {
 		spin_unlock_bh(&tcp_list.lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_INFO "get_outflow_tcp map_port: map list full.\n");
+#endif
 		return -1;
 	}
 	
@@ -1134,22 +1234,22 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
                 		if (ftState == FILTER_ACCEPT) {
 					retport = StateContext->newport;
 #ifdef IVI_DEBUG_MAP
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map %d -> %d, TCP state %d\n", 
-						StateContext->oldport, StateContext->newport, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Found map %d -> %d, TCP state %d, xlated = %d\n", 
+						StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 				}
 				else if (ftState == FILTER_DROP) {
 					// Return -1 to drop current segment, keep the state info.
 #ifdef IVI_DEBUG_MAP
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map %d -> %d, TCP state %d\n", 
-						StateContext->oldport, StateContext->newport, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid packet on map %d -> %d, TCP state %d, xlated = %d\n", 
+						StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 				}
 				else  // FILTER_DROP_CLEAN
 				{
 #ifdef IVI_DEBUG_MAP
-					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map %d -> %d, TCP state %d\n", 
-						StateContext->oldport, StateContext->newport, StateContext->Status);
+					printk(KERN_DEBUG "get_outflow_tcp_map_port: Invalid state on map %d -> %d, TCP state %d, xlated = %d\n", 
+						StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 					// Remove state info, return -1
 					list_del(&StateContext->node);
@@ -1205,7 +1305,9 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 			
 			if (remaining <= 0) {
 				spin_unlock_bh(&tcp_list.lock);
+#ifdef IVI_DEBUG_MAP
 				printk(KERN_INFO "get_outflow_tcp_map_port: failed to assign a new map port for %d\n", oldp);
+#endif
 				return -1;
 			}
 		}
@@ -1239,12 +1341,13 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 		// Routine to add new map-info
 		StateContext->oldport = oldp;
 		StateContext->newport = retport;
+		StateConext->xlated = xlated;
 		list_add(&StateContext->node, &tcp_list.chain);
 		tcp_list.size++;
 		tcp_list.last_alloc = retport;
 #ifdef IVI_DEBUG_MAP
-		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map %d -> %d added, TCP state %d\n", 
-			StateContext->oldport, StateContext->newport, StateContext->Status);
+		printk(KERN_DEBUG "get_outflow_tcp_map_port: New map %d -> %d added, TCP state %d, xlated = %d\n", 
+			StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 	}
 	
@@ -1256,7 +1359,7 @@ int get_outflow_tcp_map_port(__be16 oldp, struct tcphdr *th, __u32 len, __be16 *
 }
 EXPORT_SYMBOL(get_outflow_tcp_map_port);
 
-int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be16 *oldp)
+int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, bool *xlated, __be16 *oldp)
 {
 	FILTER_STATUS       ftState;
 	PTCP_STATE_CONTEXT  StateContext = NULL;
@@ -1265,14 +1368,20 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be16 *o
 	int ret = -1;
 	
 	refresh_tcp_map_list();
+
+	if (!xlated || !oldp)
+		return -1;
 	
 	*oldp = 0;
+	*xlated = false;
 	
 	spin_lock_bh(&tcp_list.lock);
 	
 	if (list_empty(&tcp_list.chain)) {
 		spin_unlock_bh(&tcp_list.lock);
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_INFO "get_inflow_tcp_map_port: map list empty.\n");
+#endif
 		return -1;
 	}
 	
@@ -1284,24 +1393,25 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be16 *o
 			
 			if (ftState == FILTER_ACCEPT) {
 				*oldp = StateContext->oldport;
+				*xlated = StateConext->xlated;
 				ret = 0;
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Found map %d -> %d, TCP state %d\n", 
-					StateContext->oldport, StateContext->newport, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Found map %d -> %d, TCP state %d, xlated = %d\n", 
+					StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 			}
 			else if (ftState == FILTER_DROP) {
 				// Return -1 to drop current segment but keep the state info.
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid packet on map %d -> %d, TCP state %d\n", 
-					StateContext->oldport, StateContext->newport, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid packet on map %d -> %d, TCP state %d, xlated = %d\n", 
+					StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 			}
 			else  // FILTER_DROP_CLEAN
 			{
 #ifdef IVI_DEBUG_MAP
-				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid state on map %d -> %d, TCP state %d\n", 
-					StateContext->oldport, StateContext->newport, StateContext->Status);
+				printk(KERN_DEBUG "get_inflow_tcp_map_port: Invalid state on map %d -> %d, TCP state %d, xlated = %d\n", 
+					StateContext->oldport, StateContext->newport, StateContext->Status, StateConext->xlated);
 #endif
 				// Remove state info and return -1 to drop current segment
 				list_del(&StateContext->node);

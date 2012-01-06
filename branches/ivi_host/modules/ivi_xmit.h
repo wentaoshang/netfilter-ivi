@@ -18,6 +18,7 @@
 #include <asm/checksum.h>
 #include <net/arp.h>
 #include <net/ip.h>
+#include <net/checksum.h>
 #include <net/ipv6.h>
 #include <net/ip6_route.h>
 #include <linux/icmp.h>
@@ -41,6 +42,7 @@ extern __u8 addr_fmt;
 extern __u16 mss_limit;
 
 extern int ivi_v4v6_xmit(struct sk_buff *skb);
+extern int ivi_v6v6_xmit(struct sk_buff *skb);  // ipv6 local out
 extern int ivi_v6v4_xmit(struct sk_buff *skb);
 
 
