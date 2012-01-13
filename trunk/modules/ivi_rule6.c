@@ -288,7 +288,6 @@ int ivi_rule6_insert(struct rule_info *rule)
 	spin_unlock_bh(&radix_lock);
 	return ret;
 }
-EXPORT_SYMBOL(ivi_rule6_insert);
 
 
 /*
@@ -337,6 +336,9 @@ int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u16 *ratio, u16 *adjacent
 	struct rule6_node* n;
 	int ret;
 
+	if (!plen)
+		return -1;
+
 	ret = -1;
 	*plen = 0;
 
@@ -348,10 +350,14 @@ int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u16 *ratio, u16 *adjacent
 #ifdef IVI_DEBUG_RULE
 		printk(KERN_DEBUG "ivi_rule6_lookup: " NIP6_FMT " -> %d\n", NIP6(n->key), n->bit_pos);
 #endif
-		*plen = n->plen6;
-		*ratio = n->ratio;
-		*adjacent = n->adjacent;
-		*fmt = n->format;
+		if (plen)
+			*plen = n->plen6;
+		if (ratio)
+			*ratio = n->ratio;
+		if (adjacent)
+			*adjacent = n->adjacent;
+		if (fmt)
+			*fmt = n->format;
 		ret = 0;
 	}
 	
@@ -360,7 +366,6 @@ int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u16 *ratio, u16 *adjacent
 	return ret;
 	
 }
-EXPORT_SYMBOL(ivi_rule6_lookup);
 
 
 /*
@@ -537,6 +542,8 @@ int ivi_rule6_delete(struct rule_info *rule)
 	if ((fn->flag & RN_RINFO) 
 	    && (fn->bit_pos == rule->plen6 + rule->plen4)
 	    && (fn->plen6 == rule->plen6)
+	    && (fn->ratio == rule->ratio)
+	    && (fn->adjacent == rule->adjacent)
 	    && (fn->format == rule->format)
 	    && ipv6_prefix_equal(&fn->key, &rule->prefix6, fn->bit_pos)) {
 		if (radix_delete_trim(fn) != NULL) {
@@ -551,7 +558,6 @@ int ivi_rule6_delete(struct rule_info *rule)
 
 	return ret;
 }
-EXPORT_SYMBOL(ivi_rule6_delete);
 
 
 /*
@@ -628,10 +634,9 @@ void ivi_rule6_flush(void)
 
 	spin_unlock_bh(&radix_lock);
 }
-EXPORT_SYMBOL(ivi_rule6_flush);
 
 
-static int __init ivi_rule6_init(void) {
+int ivi_rule6_init(void) {
 	radix = NULL;
 	spin_lock_init(&radix_lock);
 #ifdef IVI_DEBUG
@@ -640,17 +645,11 @@ static int __init ivi_rule6_init(void) {
 #endif
 	return 0;
 }
-module_init(ivi_rule6_init);
 
-static void __exit ivi_rule6_exit(void) {
+void ivi_rule6_exit(void) {
 	ivi_rule6_flush();
 #ifdef IVI_DEBUG
 	printk(KERN_DEBUG "IVI: module ivi_rule6 unloaded.\n");
 	printk(KERN_DEBUG "IVI: module ivi_rule6 memory balance = %d\n", balance);
 #endif
 }
-module_exit(ivi_rule6_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI 6to4 Prefix Mapping Kernel Module");

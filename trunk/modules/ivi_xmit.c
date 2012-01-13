@@ -16,7 +16,6 @@
 
 #include "ivi_xmit.h"
 
-static struct net_device *v4dev, *v6dev;
 
 static inline int link_local_addr(const struct in6_addr *addr) {
 	return ((addr->s6_addr32[0] & htonl(0xffc00000)) == htonl(0xfe800000));
@@ -31,7 +30,6 @@ static inline int addr_in_v4network(const unsigned int *addr) {
 }
 
 u8 ivi_mode = 0;  // working mode for IVI translation
-EXPORT_SYMBOL(ivi_mode);
 
 /*
  * Local parameter cache for fast path local address translation in hgw mode
@@ -39,28 +37,21 @@ EXPORT_SYMBOL(ivi_mode);
 
 // private v4 network where v4dev is located.
 __be32 v4network = 0x01010100;  // "1.1.1.0" in host byte order
-EXPORT_SYMBOL(v4network);
 
 __be32 v4mask = 0xffffff00;  // "/24"
-EXPORT_SYMBOL(v4mask);
 
 // NAT public address for v4 network
 __be32 v4publicaddr = 0x03030303;  // "3.3.3.3" in host byte order
-EXPORT_SYMBOL(v4publicaddr);
 
 // v6 prefix where v4 network or public address is mapped into.
 __u8 v6prefix[16] = { 0x20, 0x01, 0x0d, 0xa8, 0x01, 0x23, 0x04, 0x56 };  // "2001:da8:123:456::" in network byte order
-EXPORT_SYMBOL(v6prefix);
 
 __be32 v6prefixlen = 8;  // "/64" prefix length in bytes (8)
-EXPORT_SYMBOL(v6prefixlen);
 
 u8 hgw_fmt = 0;  // ivi translated address format
-EXPORT_SYMBOL(hgw_fmt);
 
 
 u16 mss_limit = 1440;  // max mss supported
-EXPORT_SYMBOL(mss_limit);
 
 
 #define ADDR_DIR_SRC 0
@@ -87,13 +78,12 @@ static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, 
 		suffix = hgw_suffix;
 	} else {
 		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &ratio, &adjacent, &fmt) != 0) {
-#ifdef IVI_DEBUG_RULE
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
 #endif
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
-		
 		if (fmt != ADDR_FMT_NONE && ratio && adjacent) {
 			offset = (port / ratio) % adjacent;
 			suffix = fls(ratio) - 1;
@@ -128,7 +118,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 
 	if (link_local_addr(v6addr)) {
 		// Do not translate ipv6 link local address.
-#ifdef IVI_DEBUG_RULE
+#ifdef IVI_DEBUG_MAP
 		printk(KERN_DEBUG "ipaddr_6to4: ignore link local address.\n");
 #endif
 		return -1;
@@ -139,7 +129,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 		prefixlen = v6prefixlen;
 	} else {
 		if (ivi_rule6_lookup(v6addr, &prefixlen, ratio, adjacent, &fmt) != 0) {
-#ifdef IVI_DEBUG_RULE
+#ifdef IVI_DEBUG_MAP
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
 #endif
 			return -1;
@@ -368,7 +358,6 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	netif_rx(newskb);
 	return 0;
 }
-EXPORT_SYMBOL(ivi_v4v6_xmit);
 
 
 static inline bool port_in_range(u16 _port, u16 _ratio, u16 _adjacent, u16 _offset)
@@ -596,36 +585,3 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	netif_rx(newskb);
 	return 0;
 }
-EXPORT_SYMBOL(ivi_v6v4_xmit);
-
-int ivi_v4_dev(struct net_device *dev) {
-	v4dev = dev;
-	return v4dev->ifindex;
-}
-EXPORT_SYMBOL(ivi_v4_dev);
-
-int ivi_v6_dev(struct net_device *dev) {
-	v6dev = dev;
-	return v6dev->ifindex;
-}
-EXPORT_SYMBOL(ivi_v6_dev);
-
-static int __init ivi_xmit_init(void) {
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_xmit loaded.\n");
-#endif
-	return 0;
-}
-module_init(ivi_xmit_init);
-
-static void __exit ivi_xmit_exit(void) {
-#ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_xmit unloaded.\n");
-#endif
-}
-module_exit(ivi_xmit_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("ZHU Yuncheng <haoyu@cernet.edu.cn>");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI Packet Translation & Transmission Kernel Module");

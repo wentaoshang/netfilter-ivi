@@ -635,10 +635,18 @@ static int check_leaf(struct tleaf *l, t_key key, struct in6_addr *prefix6, int 
 	hlist_for_each_entry(li, temp, head, node) {
 		if (l->key == (key & li->mask_plen)) {
 			ipv6_addr_copy(prefix6, &li->prefix6);
-			*plen6 = li->prefix6_len;
-			*ratio = li->ratio;
-			*adjacent = li->adjacent;
-			*fmt = li->format;
+			if (plen6)
+				*plen6 = li->prefix6_len;
+			if (ratio)
+				*ratio = li->ratio;
+			if (adjacent)
+				*adjacent = li->adjacent;
+			if (fmt)
+				*fmt = li->format;
+#ifdef IVI_DEBUG_RULE
+			printk(KERN_DEBUG "ivi_rule_lookup: " NIP4_FMT " -> " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
+				NIP4(key), NIP6(li->prefix6), li->prefix6_len, li->ratio, li->adjacent, li->format);
+#endif
 			return 0;
 		}
 	}
@@ -666,12 +674,6 @@ int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u16 *ratio, u
 	/* Just a leaf? */
 	if (IS_LEAF(n)) {
 		ret = check_leaf((struct tleaf *)n, key, prefix6, plen6, ratio, adjacent, fmt);
-		if (ret == 0) {
-#ifdef IVI_DEBUG_RULE
-		printk(KERN_DEBUG "ivi_rule_lookup: " NIP4_FMT " -> " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
-			NIP4(key), NIP6(*prefix6), *plen6, *ratio, *adjacent, *fmt);
-#endif
-		}
 		goto found;
 	}
 
@@ -695,10 +697,6 @@ int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u16 *ratio, u
 			ret = check_leaf((struct tleaf *)n, key, prefix6, plen6, ratio, adjacent, fmt);
 			if (ret > 0)
 				goto backtrace;
-#ifdef IVI_DEBUG_RULE
-			printk(KERN_DEBUG "ivi_rule_lookup: " NIP4_FMT " -> " NIP6_FMT "/%d, ratio = %d, adjacent = %d, address format %d\n", 
-				NIP4(key), NIP6(*prefix6), *plen6, *ratio, *adjacent, *fmt);
-#endif
 			goto found;
 		}
 
@@ -763,7 +761,6 @@ found:
 	spin_unlock_bh(&trie_lock);
 	return ret;
 }
-EXPORT_SYMBOL(ivi_rule_lookup);
 
 static struct tleaf_info* trie_insert_node(u32 key, u32 plen)
 {
@@ -905,7 +902,6 @@ int ivi_rule_insert(struct rule_info *rule)
 #endif
 	return 0;
 }
-EXPORT_SYMBOL(ivi_rule_insert);
 
 static void trie_leaf_remove(struct tleaf *l)
 {
@@ -971,7 +967,6 @@ out_from_lock:
 out:
 	return ret;
 }
-EXPORT_SYMBOL(ivi_rule_delete);
 
 /*
  * Scan for the next right_leaf starting at node c
@@ -1064,28 +1059,21 @@ void ivi_rule_flush(void)
 
 	spin_unlock_bh(&trie_lock);
 }
-EXPORT_SYMBOL(ivi_rule_flush);
 
-static int __init ivi_rule_init(void) {
+int ivi_rule_init(void) {
 	trie = NULL;
 	spin_lock_init(&trie_lock);
 #ifdef IVI_DEBUG
 	balance = 0;
-	printk(KERN_DEBUG "IVI: module ivi_rule loaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_rule loaded.\n");
 #endif
 	return 0;
 }
-module_init(ivi_rule_init);
 
-static void __exit ivi_rule_exit(void) {
+void ivi_rule_exit(void) {
 	ivi_rule_flush();
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_rule unloaded.\n");
-	printk(KERN_DEBUG "IVI: module ivi_rule memory balance = %d\n", balance);
+	printk(KERN_DEBUG "IVI: ivi_rule unloaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_rule memory balance = %d\n", balance);
 #endif
 }
-module_exit(ivi_rule_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI 4to6 Prefix Mapping Kernel Module");

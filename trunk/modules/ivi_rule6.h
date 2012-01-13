@@ -2,7 +2,6 @@
 #define IVI_RULE6_H
 
 #include <linux/module.h>
-
 #include <linux/list.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
@@ -16,5 +15,8 @@ extern int ivi_rule6_insert(struct rule_info *rule);
 extern int ivi_rule6_lookup(struct in6_addr *addr, int *plen, u16 *ratio, u16 *adjacent, u8 *fmt);
 extern int ivi_rule6_delete(struct rule_info *rule);
 extern void ivi_rule6_flush(void);
+
+extern int ivi_rule6_init(void);
+extern void ivi_rule6_exit(void);
 
 #endif
