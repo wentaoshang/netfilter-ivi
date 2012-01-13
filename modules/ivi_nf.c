@@ -71,23 +71,18 @@ int nf_running(const int run) {
 #endif
 	return running;
 }
-EXPORT_SYMBOL(nf_running);
 
 int nf_getv4dev(struct net_device *dev) {
 	v4_dev = dev;
-	ivi_v4_dev(dev);
 	return 0;
 }
-EXPORT_SYMBOL(nf_getv4dev);
 
 int nf_getv6dev(struct net_device *dev) {
 	v6_dev = dev;
-	ivi_v6_dev(dev);
 	return 0;
 }
-EXPORT_SYMBOL(nf_getv6dev);
 
-static int __init ivi_nf_init(void) {
+int ivi_nf_init(void) {
 	running = 0;
 	v4_dev = NULL;
 	v6_dev = NULL;
@@ -96,28 +91,24 @@ static int __init ivi_nf_init(void) {
 	nf_register_hook(&v6_ops);
 
 #ifdef IVI_DEBUG
-	printk(KERN_ERR "IVI: module ivi_nf loaded.\n");
+	printk(KERN_ERR "IVI: ivi_nf loaded.\n");
 #endif
 	return 0;
 }
-module_init(ivi_nf_init);
 
-static void __exit ivi_nf_exit(void) {
+void ivi_nf_exit(void) {
 	running = 0;
-	v4_dev = NULL;
-	v6_dev = NULL;
 
 	nf_unregister_hook(&v4_ops);
 	nf_unregister_hook(&v6_ops);
+	
+	if (v4_dev)
+		dev_put(v4_dev);
+
+	if (v6_dev)
+		dev_put(v6_dev);
 
 #ifdef IVI_DEBUG
-	printk(KERN_ERR "IVI: module ivi_nf unloaded.\n");
+	printk(KERN_ERR "IVI: ivi_nf unloaded.\n");
 #endif
 }
-module_exit(ivi_nf_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("ZHU Yuncheng <haoyu@cernet.edu.cn>");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI Netfilter Address Kernel Module");
-

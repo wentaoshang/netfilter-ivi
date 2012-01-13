@@ -12,29 +12,22 @@
 
 
 struct map_list udp_list;
-EXPORT_SYMBOL(udp_list);
-
 struct map_list icmp_list;
-EXPORT_SYMBOL(icmp_list);
 
 
 /* ratio and offset together indicate the port pool range */
 u16 hgw_ratio = 1;
-EXPORT_SYMBOL(hgw_ratio);
 
 u16 hgw_offset = 0;
-EXPORT_SYMBOL(hgw_offset);
 
 u16 hgw_suffix = 0;    // if addr fmt is ADDR_FMT_SUFFIX, this 2 bytes code is used instead
-EXPORT_SYMBOL(hgw_suffix);
 
 u16 hgw_adjacent = 1;
-EXPORT_SYMBOL(hgw_adjacent);
 
 /* list operations */
 
 // Get current size of the list, must be protected by spin lock when calling this function
-static __inline int get_list_size(struct map_list *list)
+static inline int get_list_size(struct map_list *list)
 {
 	return list->size;
 }
@@ -42,7 +35,7 @@ static __inline int get_list_size(struct map_list *list)
 #ifdef IVI_HASH
 
 // Init list
-void init_map_list(struct map_list *list, time_t timeout)
+static void init_map_list(struct map_list *list, time_t timeout)
 {
 	int i;
 	spin_lock_init(&list->lock);
@@ -54,10 +47,9 @@ void init_map_list(struct map_list *list, time_t timeout)
 	list->last_alloc = 0;
 	list->timeout = timeout;
 }
-EXPORT_SYMBOL(init_map_list);
 
 // Check whether a newport is in use now, must be protected by spin lock when calling this function
-static __inline int port_in_use(__be16 port, struct map_list *list)
+static int port_in_use(__be16 port, struct map_list *list)
 {
 	int ret = 0;
 	int hash;
@@ -135,7 +127,6 @@ void refresh_map_list(struct map_list *list)
 	}
 	spin_unlock_bh(&list->lock);
 }
-EXPORT_SYMBOL(refresh_map_list);
 
 // Clear the entire list, must NOT acquire spin lock when calling this function
 void free_map_list(struct map_list *list)
@@ -160,7 +151,6 @@ void free_map_list(struct map_list *list)
 	}
 	spin_unlock_bh(&list->lock);
 }
-EXPORT_SYMBOL(free_map_list);
 
 /* mapping operations */
 
@@ -264,7 +254,6 @@ int get_outflow_map_port(struct map_list *list, __be32 oldaddr, __be16 oldp, u16
 	
 	return 0;
 }
-EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
 int get_inflow_map_port(struct map_list *list, __be16 newp, __be32* oldaddr, __be16 *oldp)
@@ -307,12 +296,11 @@ int get_inflow_map_port(struct map_list *list, __be16 newp, __be32* oldaddr, __b
 	
 	return ret;
 }
-EXPORT_SYMBOL(get_inflow_map_port);
 
 #else
 
 // Init list
-void init_map_list(struct map_list *list, time_t timeout)
+static void init_map_list(struct map_list *list, time_t timeout)
 {
 	spin_lock_init(&list->lock);
 	INIT_LIST_HEAD(&list->chain);
@@ -320,10 +308,9 @@ void init_map_list(struct map_list *list, time_t timeout)
 	list->timeout = timeout;
 	list->last_alloc = 0;
 }
-EXPORT_SYMBOL(init_map_list);
 
 // Check whether a port is in use now, must be protected by spin lock when calling this function
-static __inline int port_in_use(__be16 port, struct map_list *list)
+static int port_in_use(__be16 port, struct map_list *list)
 {
 	int ret = 0;
 
@@ -387,7 +374,6 @@ void refresh_map_list(struct map_list *list)
 	}
 	spin_unlock_bh(&list->lock);
 }
-EXPORT_SYMBOL(refresh_map_list);
 
 // Clear the entire list, must NOT acquire spin lock when calling this function
 void free_map_list(struct map_list *list)
@@ -406,7 +392,6 @@ void free_map_list(struct map_list *list)
 	}
 	spin_unlock_bh(&list->lock);
 }
-EXPORT_SYMBOL(free_map_list);
 
 
 /* mapping operations */
@@ -508,7 +493,6 @@ int get_outflow_map_port(struct map_list *list, __be32 oldaddr, __be16 oldp, u16
 	
 	return 0;
 }
-EXPORT_SYMBOL(get_outflow_map_port);
 
 // Get mapped port and address for inflow packet, input and output are in host bypt order, return -1 if failed
 int get_inflow_map_port(struct map_list *list, __be16 newp, __be32 *oldaddr, __be16 *oldp)
@@ -548,32 +532,25 @@ int get_inflow_map_port(struct map_list *list, __be16 newp, __be32 *oldaddr, __b
 	
 	return ret;
 }
-EXPORT_SYMBOL(get_inflow_map_port);
 
 #endif
 
-static int __init ivi_map_init(void) {
+int ivi_map_init(void) {
 #ifdef IVI_HASH
-	printk(KERN_INFO "IVI: module ivi_map use hash list.\n");
+	printk(KERN_INFO "IVI: ivi_map use hash list.\n");
 #endif
 	init_map_list(&udp_list, 60);
 	init_map_list(&icmp_list, 30);
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_map loaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_map loaded.\n");
 #endif 
 	return 0;
 }
-module_init(ivi_map_init);
 
-static void __exit ivi_map_exit(void) {
+void ivi_map_exit(void) {
 	free_map_list(&udp_list);
 	free_map_list(&icmp_list);
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_map unloaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_map unloaded.\n");
 #endif
 }
-module_exit(ivi_map_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI NAT44 Address Port Mapping Kernel Module");

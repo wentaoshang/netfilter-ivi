@@ -33,5 +33,12 @@
 
 #define IVI_IOCTL_LEN	32
 
+#ifdef __KERNEL__
+
+extern int ivi_ioctl_init(void);
+extern void ivi_ioctl_exit(void);
+
+#endif
+
 #endif /* IVI_IOCTL_H */
 

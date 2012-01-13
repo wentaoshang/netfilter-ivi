@@ -10,14 +10,12 @@
  *	Wentao Shang	:	Add new control codes for ivi and nat filter address configuration.
  */
 
-#ifdef MODVERSIONS
-#include <linux/modversions.h>
-#endif
 #include <linux/module.h>
 #include <linux/ioctl.h>
 #include <linux/fs.h>
 #include <linux/netdevice.h>
 #include <linux/uaccess.h>
+
 #include "ivi_nf.h"
 #include "ivi_xmit.h"
 #include "ivi_ioctl.h"
@@ -208,27 +206,20 @@ struct file_operations ivi_ops = {
 	.release	=	ivi_release,
 };
 
-static int __init ivi_ioctl_init(void) {
+int ivi_ioctl_init(void) {
 	int retval;
 	if ((retval = register_chrdev(IVI_IOCTL, IVI_DEVNAME, &ivi_ops)) < 0) {
 		printk(KERN_ERR "failed to register ioctl as character device, code %d.\n", retval);
 	}
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_ioctl loaded with return value %d.\n", retval);
+	printk(KERN_DEBUG "IVI: ivi_ioctl loaded with return value %d.\n", retval);
 #endif
 	return retval;
 }
-module_init(ivi_ioctl_init);
 
-static void __exit ivi_ioctl_exit(void) {
+void ivi_ioctl_exit(void) {
 	unregister_chrdev(IVI_IOCTL, IVI_DEVNAME);
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_ioctl unloaded with return value.\n");
+	printk(KERN_DEBUG "IVI: ivi_ioctl unloaded with return value.\n");
 #endif
 }
-module_exit(ivi_ioctl_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("ZHU Yuncheng <haoyu@cernet.edu.cn>");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI Configuration Interface Kernel Module");

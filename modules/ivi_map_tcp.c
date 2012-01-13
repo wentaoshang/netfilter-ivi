@@ -786,7 +786,6 @@ FILTER_STATUS UpdateTcpStateContext(struct tcphdr *th, __u32 len, PACKET_DIR dir
 }
 
 struct tcp_map_list tcp_list;
-EXPORT_SYMBOL(tcp_list);
 
 #ifdef IVI_HASH
 void init_tcp_map_list(void)
@@ -800,7 +799,6 @@ void init_tcp_map_list(void)
 	tcp_list.size = 0;
 	tcp_list.last_alloc = 0;
 }
-EXPORT_SYMBOL(init_tcp_map_list);
 
 // Refresh the timer for each map_tuple, must NOT acquire spin lock when calling this function
 void refresh_tcp_map_list(void)
@@ -832,7 +830,6 @@ void refresh_tcp_map_list(void)
 	}
 	spin_unlock_bh(&tcp_list.lock);
 }
-EXPORT_SYMBOL(refresh_tcp_map_list);
 
 // Clear the entire list, must NOT acquire spin lock when calling this function
 void free_tcp_map_list(void)
@@ -858,10 +855,9 @@ void free_tcp_map_list(void)
 	}
 	spin_unlock_bh(&tcp_list.lock);
 }
-EXPORT_SYMBOL(free_tcp_map_list);
 
 // Check whether a port is in use now, must be protected by spin lock when calling this function
-static __inline int tcp_port_in_use(__be16 port)
+static inline int tcp_port_in_use(__be16 port)
 {
 	int ret = 0;
 	int hash;
@@ -1045,7 +1041,6 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, u16 ratio, u16 adjacen
 	
 	return (retport == 0 ? -1 : 0);
 }
-EXPORT_SYMBOL(get_outflow_tcp_map_port);
 
 int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be32 *oldaddr, __be16 *oldp)
 {
@@ -1116,7 +1111,6 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be32 *o
 
 	return ret;
 }
-EXPORT_SYMBOL(get_inflow_tcp_map_port);
 
 #else
 
@@ -1127,7 +1121,6 @@ void init_tcp_map_list(void)
 	tcp_list.size = 0;
 	tcp_list.last_alloc = 0;
 }
-EXPORT_SYMBOL(init_tcp_map_list);
 
 // Refresh the timer for each map_tuple, must NOT acquire spin lock when calling this function
 void refresh_tcp_map_list(void)
@@ -1152,7 +1145,6 @@ void refresh_tcp_map_list(void)
 	}
 	spin_unlock_bh(&tcp_list.lock);
 }
-EXPORT_SYMBOL(refresh_tcp_map_list);
 
 // Clear the entire list, must NOT acquire spin lock when calling this function
 void free_tcp_map_list(void)
@@ -1171,10 +1163,9 @@ void free_tcp_map_list(void)
 	}
 	spin_unlock_bh(&tcp_list.lock);
 }
-EXPORT_SYMBOL(free_tcp_map_list);
 
 // Check whether a port is in use now, must be protected by spin lock when calling this function
-static __inline int tcp_port_in_use(__be16 port)
+static inline int tcp_port_in_use(__be16 port)
 {
 	int ret = 0;
 
@@ -1347,7 +1338,6 @@ int get_outflow_tcp_map_port(__be32 oldaddr, __be16 oldp, u16 ratio, u16 adjacen
 	
 	return (retport == 0 ? -1 : 0);
 }
-EXPORT_SYMBOL(get_outflow_tcp_map_port);
 
 int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be32 *oldaddr, __be16 *oldp)
 {
@@ -1413,30 +1403,23 @@ int get_inflow_tcp_map_port(__be16 newp, struct tcphdr *th, __u32 len, __be32 *o
 
 	return ret;
 }
-EXPORT_SYMBOL(get_inflow_tcp_map_port);
 #endif
 
 
-static int __init ivi_map_tcp_init(void) {
+int ivi_map_tcp_init(void) {
 #ifdef IVI_HASH
-	printk(KERN_INFO "IVI: module ivi_map_tcp use hash list.\n");
+	printk(KERN_INFO "IVI: ivi_map_tcp use hash list.\n");
 #endif
 	init_tcp_map_list();
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_map_tcp loaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_map_tcp loaded.\n");
 #endif 
 	return 0;
 }
-module_init(ivi_map_tcp_init);
 
-static void __exit ivi_map_tcp_exit(void) {
+void ivi_map_tcp_exit(void) {
 	free_tcp_map_list();
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_map_tcp unloaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_map_tcp unloaded.\n");
 #endif
 }
-module_exit(ivi_map_tcp_exit);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Wentao Shang <wentaoshang@gmail.com>");
-MODULE_DESCRIPTION("IVI NAT44 Address TCP Port Mapping Kernel Module");
