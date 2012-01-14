@@ -477,6 +477,39 @@ int main(int argc, char *argv[]) {
 			exit(-1);
 		}
 	}
+	else if ((argc == 7) && (strcmp(argv[1], "rule") == 0)) {
+		memset(&rule, 0, sizeof(rule));
+		
+		if (strcmp(argv[2], "add") == 0) {
+			if ((retval = inet_pton(AF_INET, argv[3], (void*)(&(rule.prefix4)))) != 1) {
+				printf("Error: failed to parse IPv4 prefix, code %d.\n", retval);
+				exit(-1);
+			}
+			rule.plen4 = atoi(argv[4]);
+			mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
+			rule.prefix4 = ntohl(rule.prefix4);
+			rule.prefix4 = rule.prefix4 & mask;
+		
+			if ((retval = inet_pton(AF_INET6, argv[5], (void*)(&(rule.prefix6)))) != 1) {
+				printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
+				exit(-1);
+			}
+			rule.plen6 = atoi(argv[6]);
+			rule.ratio = 1;
+			rule.adjacent = 1;
+			rule.format = ADDR_FMT_NONE;
+
+			// Insert rule
+			if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
+				printf("Error: failed to add prefix mapping rule, code %d.\n", retval);
+				exit(-1);
+			}
+			printf("Info: successfully add rule.\n");
+		} else {
+			printf("Error: unknown rule command '%s'.\n", argv[2]);
+			exit(-1);
+		}
+	}
 	else if ((argc == 9) && (strcmp(argv[1], "rule") == 0)) {
 		memset(&rule, 0, sizeof(rule));
 		
@@ -521,6 +554,7 @@ int main(int argc, char *argv[]) {
 		printf("       ivictl mss limit [mss_val]\n");
 		printf("       ivictl start [v4_dev] [v6_dev]\n");
 		printf("       ivictl rule add default [v6_prefix] [v6_prefix_len]\n");
+		printf("       ivictl rule add [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len]\n");
 		printf("       ivictl rule add [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len] [ratio] [adjacent]\n");
 		printf("       ivictl stop\n");
 	}
