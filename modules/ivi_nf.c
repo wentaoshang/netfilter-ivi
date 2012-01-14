@@ -22,12 +22,7 @@ unsigned int nf_hook4(unsigned int hooknum, struct sk_buff *skb,
 		return NF_ACCEPT;
 	}
 
-	if (ivi_v4v6_xmit(skb) == 0) {
-		return NF_DROP;
-	}
-	else {
-		return NF_ACCEPT;
-	}
+	return ivi_v4v6_xmit(skb);
 }
 
 unsigned int nf_hook6(unsigned int hooknum, struct sk_buff *skb,
@@ -38,12 +33,7 @@ unsigned int nf_hook6(unsigned int hooknum, struct sk_buff *skb,
 		return NF_ACCEPT;
 	}
 
-	if (ivi_v6v4_xmit(skb) == 0) {
-		return NF_DROP;
-	}
-	else {
-		return NF_ACCEPT;
-	}
+	return ivi_v6v4_xmit(skb);
 }
 
 struct nf_hook_ops v4_ops = {
