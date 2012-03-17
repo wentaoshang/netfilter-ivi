@@ -641,7 +641,7 @@ int ivi_rule6_init(void) {
 	spin_lock_init(&radix_lock);
 #ifdef IVI_DEBUG
 	balance = 0;
-	printk(KERN_DEBUG "IVI: module ivi_rule6 loaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_rule6 loaded.\n");
 #endif
 	return 0;
 }
@@ -649,7 +649,7 @@ int ivi_rule6_init(void) {
 void ivi_rule6_exit(void) {
 	ivi_rule6_flush();
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "IVI: module ivi_rule6 unloaded.\n");
-	printk(KERN_DEBUG "IVI: module ivi_rule6 memory balance = %d\n", balance);
+	printk(KERN_DEBUG "IVI: ivi_rule6 unloaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_rule6 memory balance = %d\n", balance);
 #endif
 }

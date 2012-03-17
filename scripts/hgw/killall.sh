@@ -1,5 +1,5 @@
 #!/bin/sh
 
-../../utils/ivictl stop
+../../utils/ivictl -q
 
 ./control stop

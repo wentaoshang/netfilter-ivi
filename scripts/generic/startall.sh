@@ -2,6 +2,7 @@
 
 ./control start
 
-# ../../utils/ivictl format suffix 256 1
-../../utils/ivictl start eth1 eth0 1.1.1.0 24 2001:da8:123:456:: 64
+../../utils/ivictl -r -d -P 2001:da8:c4c6:: -L 48
+
+../../utils/ivictl -s -i eth1 -I eth0 -H -p 1.1.1.0 -l 24 -P 2001:da8:123:456:: -L 64
 

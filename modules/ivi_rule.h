@@ -11,17 +11,6 @@
 
 #include "ivi_config.h"
 
-
-struct rule_info {
-	u32 prefix4;
-	int plen4;
-	struct in6_addr prefix6;
-	int plen6;
-	u16 ratio;
-	u16 adjacent;
-	u8 format;
-};
-
 extern int ivi_rule_lookup(u32 key, struct in6_addr *prefix6, int *plen6, u16 *ratio, u16 *adjacent, u8 *fmt);
 extern int ivi_rule_insert(struct rule_info *rule);
 extern int ivi_rule_delete(struct rule_info *rule);

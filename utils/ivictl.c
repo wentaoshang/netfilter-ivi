@@ -4,562 +4,406 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
+#include <getopt.h>
+
 #include "../modules/ivi_ioctl.h"
 
-struct rule_info {
-	unsigned int prefix4;
-	int plen4;
-	struct in6_addr prefix6;
-	int plen6;
-	unsigned short ratio;
-	unsigned short adjacent;
-	unsigned char format;
+static const struct option longopts[] =
+{
+	{"rule", no_argument, NULL, 'r'},
+	{"start", no_argument, NULL, 's'},
+	{"stop", required_argument, NULL, 'q'},
+	{"help", no_argument, NULL, 'h'},
+	{"hgw", no_argument, NULL, 'H'},
+	{"nat44", no_argument, NULL, 'N'},
+	{"default", no_argument, NULL, 'd'},
+	{"prefix4", required_argument, NULL, 'p'},
+	{"prefix4len", required_argument, NULL, 'l'},
+	{"prefix6", required_argument, NULL, 'P'},
+	{"prefix6len",required_argument, NULL, 'L'},
+	{"ratio", required_argument, NULL, 'R'},
+	{"adjacent", required_argument, NULL, 'M'},
+	{"format", required_argument, NULL, 'f'},
+	{"offset", required_argument, NULL, 'o'},
+	{"addr4", required_argument, NULL, 'a'},
+	{"publicaddr4", required_argument, NULL, 'A'},
+	{"dev4", required_argument, NULL, 'i'},
+	{"dev6", required_argument, NULL, 'I'},
+	{"mssclamping", required_argument, NULL, 'c'},
+	{NULL, no_argument, NULL, 0}
 };
 
+
+static char hgw;
+static char nat44;
+static char dev[IVI_IOCTL_LEN];
+static __u16 gma[2];  // Store R and PSID, M is stored in 'rule.adjacent'
+static __u16 mss_val;
+static struct in_addr v4addr;
+static struct rule_info rule;
+
+void usage(int status) {
+	if (status != EXIT_SUCCESS)
+		printf("Try `ivictl --help' for more information.\n");
+	else {
+		printf("\
+Usage:  ivictl -r [rule_options]\n\
+	(used to insert a mapping rule)\n\
+	ivictl -s [start_options]\n\
+	(user to start ivi module)\n\
+	ivictl -q\n\
+	(user to stop ivi module)\n\
+\n\
+rule_options:\n\
+	-p --prefix4 PREFIX4\n\
+		specify the ipv4 prefix\n\
+	-P --prefix6 PREFIX6\n\
+		specify the ipv6 prefix\n\
+	-l --prefix4len [PREFIX4 LENGTH]\n\
+		specify ipv4 prefix length\n\
+	-L --prefix6len [PREFIX6 LENGTH]\n\
+		specify the ipv6 prefix length\n\
+	-R --ratio RATIO\n\
+		specify the address sharing ratio in GMA\n\
+	-M --adjacent ADJACENT\n\
+		specify the M parameter in GMA\n\
+	-f --format FORMAT\n\
+		specify the address translation format (use 1:1 format if not specified)\n\
+		currently available format:\n\
+			postfix\n\
+			suffix\n\
+	-d --default\n\
+		specify the ipv4 prefix is '0.0.0.0/0' instead of using '-p 0.0.0.0 -l 0'\n\
+\n\
+start_options:\n\
+	-i --dev4 DEV4\n\
+		specify the name of ipv4 device\n\
+	-I --dev6 DEV6\n\
+		specify the name of ipv6 device\n\
+	-c --mssclamping MSS\n\
+		specify the reduced tcp mss value\n\
+\n\
+	HGW mode:\n\
+		-H --hgw\n\
+			specify that IVI is working as home gateway\n\
+		-N --nat44\n\
+			specify that IVI HGW is performing NAT44\n\
+		-o --offset OFFSET\n\
+			specify the local offset of the HGW, default is 0\n\
+		-p --prefix4 PREFIX4\n\
+			specify the (private) ipv4 network prefix behind the HGW\n\
+		-l --prefix4len [PREFIX4 LENGTH]\n\
+			specify the mask length of the ipv4 network\n\
+			refer to private network mask length in nat44 mode\n\
+		-A --publicaddr4 PUBLICADDR4\n\
+			specify the public ipv4 address used by the HGW\n\
+			always used with -N (--nat44)\n\
+		-P --prefix6 PREFIX6\n\
+			specify the local IVI prefix used by the HGW\n\
+		-L --prefix6len [PREFIX6 LENGTH]\n\
+			specify the length of the local IVI prefix\n\
+		-R --ratio RATIO\n\
+			specify the local address sharing ratio in GMA\n\
+		-M --adjacent ADJACENT\n\
+			specify the local M parameter in GMA\n\
+		-f --format FORMAT\n\
+			specify the local address translation format (use 1:1 format if not specified)\n\
+			currently available format:\n\
+				postfix\n\
+				suffix\n\
+\n");
+	}
+	exit(status);
+}
+
+static inline void param_init(void) {
+	hgw = 0;
+	nat44 = 0;
+	gma[0] = gma[1] = 0;
+	memset(&rule, 0, sizeof(rule));
+	rule.ratio = 1;
+	rule.adjacent = 1;
+	rule.format = ADDR_FMT_NONE;
+}
+
 int main(int argc, char *argv[]) {
-	char v4dev[IVI_IOCTL_LEN], v6dev[IVI_IOCTL_LEN];
-	int retval, fd, temp;
-	struct in_addr v4addr;
-	int mask;
-	struct rule_info rule;
+	int retval, fd, temp, optc;
 	
-	printf("IVI netfilter device controller utility v1.3\n");
+	printf("IVI netfilter device controller utility v1.4\n");
 	
 	if ((fd = open("/dev/ivi", 0)) < 0) {
 		printf("Error: cannot open virtual device for ioctl, code %d.\n", fd);
 		exit(-1);
 	}
+	
+	param_init();
+	
+	optc = getopt_long(argc, argv, "rsqh", longopts, NULL);
+	switch (optc) 
+	{
+		case 'r':
+			goto rule_opt;
+			break;
+		case 's':
+			goto start_opt;
+			break;
+		case 'q':
+			if ((retval = ioctl(fd, IVI_IOC_STOP, 0)) != 0) {
+				printf("Error: failed to stop IVI module, code %d.\n", retval);
+			}
+			else {
+				printf("Info: successfully stopped IVI module.\n");
+			}
+			goto out;
+			break;
+		case 'h':
+			close(fd);
+			usage(EXIT_SUCCESS);
+			break;
+		default:
+			close(fd);
+			usage(EXIT_FAILURE);
+			break;
+	}
+	
+rule_opt:
+	while ((optc = getopt_long(argc, argv, "p:P:l:L:R:M:f:d", longopts, NULL)) != -1)
+	{
+		switch(optc)
+		{
+			case 'd':
+				rule.prefix4 = 0;
+				rule.plen4 = 0;
+				break;
+			case 'p':
+				if ((retval = inet_pton(AF_INET, optarg, (void*)(&(rule.prefix4)))) != 1) {
+					printf("Error: failed to parse IPv4 prefix, code %d.\n", retval);
+					retval = -1;
+					goto out;
+				}
+				rule.prefix4 = ntohl(rule.prefix4);  // Convert to host byte order
+				break;
+			case 'l':
+				rule.plen4 = atoi(optarg);
+				break;
+			case 'P':
+				if ((retval = inet_pton(AF_INET6, optarg, (void*)(&(rule.prefix6)))) != 1) {
+					printf("Error: failed to parse IPv6 prefix, code %d.\n", retval);
+					retval = -1;
+					goto out;
+				}
+				break;
+			case 'L':
+				rule.plen6 = atoi(optarg);
+				break;
+			case 'R':
+				rule.ratio = atoi(optarg);
+				break;
+			case 'M':
+				rule.adjacent = atoi(optarg);
+				break;
+			case 'f':
+				if (strcmp(optarg, "postfix") == 0)
+					rule.format = ADDR_FMT_POSTFIX;
+				else if (strcmp(optarg, "suffix") == 0)
+					rule.format = ADDR_FMT_SUFFIX;
+				else {
+					printf("Error: unknown format name %s. Must be 'postfix' or 'suffix'.\n", optarg);
+					retval = -1;
+					goto out;
+				}
+				break;
+			default:
+				close(fd);
+				usage(EXIT_FAILURE);
+				break;
+		}
+	}
+	
+	// Finalize
+	temp = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);  // Generate network mask
+	rule.prefix4 = rule.prefix4 & temp;
+	
+	// Insert rule
+	if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
+		printf("Error: failed to add mapping rule, code %d.\n", retval);
+	} else {
+		printf("Info: successfully add mapping rule.\n");
+	}
+	
+	goto out;
 
-	if ((argc == 4) && (strcmp(argv[1], "start") == 0)) {
-		// Set dev
-		strncpy(v4dev, argv[2], IVI_IOCTL_LEN);
-		strncpy(v6dev, argv[3], IVI_IOCTL_LEN);
-		if ((retval = ioctl(fd, IVI_IOC_V4DEV, v4dev)) < 0) {
-			printf("Error: failed to assign IPv4 device, code %d.\n", retval);
-			exit(-1);
+
+start_opt:
+	while ((optc = getopt_long(argc, argv, "i:I:A:p:l:L:P:R:M:o:f:c:HN", longopts, NULL)) != -1)
+	{
+		switch(optc)
+		{
+			case 'i':
+				strncpy(dev, optarg, IVI_IOCTL_LEN);
+				if ((retval = ioctl(fd, IVI_IOC_V4DEV, dev)) < 0) {
+					printf("Error: failed to assign IPv4 device, code %d.\n", retval);
+					goto out;
+				}
+				break;
+			case 'I':
+				strncpy(dev, optarg, IVI_IOCTL_LEN);
+				if ((retval = ioctl(fd, IVI_IOC_V6DEV, dev)) < 0) {
+					printf("Error: failed to assign IPv6 device, code %d.\n", retval);
+					goto out;
+				}
+				break;
+			case 'c':
+				mss_val = atoi(optarg);
+				if ((retval = ioctl(fd, IVI_IOC_MSS_LIMIT, (void*)(&mss_val))) < 0) {
+					printf("Error: failed to set mssclamping, code %d.\n", retval);
+					goto out;
+				}
+				break;
+			case 'H':
+				hgw = 1;
+				break;
+			case 'p':
+				if ((retval = inet_pton(AF_INET, optarg, (void*)(&(rule.prefix4)))) != 1) {
+					printf("Error: failed to parse IPv4 prefix, code %d.\n", retval);
+					retval = -1;
+					goto out;
+				}
+				if ((retval = ioctl(fd, IVI_IOC_V4NET, &(rule.prefix4))) < 0) {
+					printf("Error: failed to assign IPv4 network prefix, code %d.\n", retval);
+					goto out;
+				}		
+				break;
+			case 'l':
+				rule.plen4 = atoi(optarg);
+				temp = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);  // Generate network mask
+				if ((retval = ioctl(fd, IVI_IOC_V4MASK, &(temp))) < 0) {
+					printf("Error: failed to assign IPv4 network prefix length, code %d.\n", retval);
+					goto out;
+				}
+				break;
+			case 'N':
+				nat44 = 1;
+				break;
+			case 'A':
+				if ((retval = inet_pton(AF_INET, optarg, (void*)(&v4addr))) != 1) {
+					printf("Error: failed to parse IPv4 public address, code %d.\n", retval);
+					retval = -1;
+					goto out;
+				}
+				if ((retval = ioctl(fd, IVI_IOC_V4PUB, &(v4addr.s_addr))) < 0) {
+					printf("Error: failed to assign IPv4 public address, code %d.\n", retval);
+					goto out;
+				}
+				nat44 = 1;
+				break;
+			case 'P':
+				if ((retval = inet_pton(AF_INET6, optarg, (void*)(&(rule.prefix6)))) != 1) {
+					printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
+					retval = -1;
+					goto out;
+				}
+				if ((retval = ioctl(fd, IVI_IOC_V6NET, &(rule.prefix6))) < 0) {
+					printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
+					goto out;
+				}
+				break;
+			case 'L':
+				rule.plen6 = atoi(optarg);
+				temp = rule.plen6 >> 3;  // counted in bytes
+				if ((retval = ioctl(fd, IVI_IOC_V6MASK, &(temp))) < 0) {
+					printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
+					goto out;
+				}
+				break;
+			case 'R':
+				gma[0] = rule.ratio = atoi(optarg);
+				break;
+			case 'M':
+				rule.adjacent = atoi(optarg);
+				break;
+			case 'f':
+				if (strcmp(optarg, "postfix") == 0)
+					rule.format = ADDR_FMT_POSTFIX;
+				else if (strcmp(optarg, "suffix") == 0)
+					rule.format = ADDR_FMT_SUFFIX;
+				else {
+					printf("Error: unknown format name %s. Must be 'postfix' or 'suffix'.\n", optarg);
+					retval = -1;
+					goto out;
+				}
+				break;
+			case 'o':
+				gma[1] = atoi(optarg);
+				break;
+			default:
+				close(fd);
+				usage(EXIT_FAILURE);
+				break;
 		}
-		if ((retval = ioctl(fd, IVI_IOC_V6DEV, v6dev)) < 0) {
-			printf("Error: failed to assign IPv6 device, code %d.\n", retval);
-			exit(-1);
+	}
+	
+	// Set local addr format for HGW mode
+	if (hgw) {
+		if (rule.format == ADDR_FMT_POSTFIX) {
+			if ((retval = ioctl(fd, IVI_IOC_POSTFIX, gma)) < 0) {
+				printf("Error: failed to set addr format, code %d.\n", retval);
+				goto out;
+			}
+			if ((retval = ioctl(fd, IVI_IOC_ADJACENT, (void*)(&rule.adjacent))) < 0) {
+				printf("Error: failed to set adjacent parameter, code %d.\n", retval);
+				goto out;
+			}
 		}
-		
-		// Start ivi
+		else if (rule.format == ADDR_FMT_SUFFIX) {
+			if ((retval = ioctl(fd, IVI_IOC_SUFFIX, gma)) < 0) {
+				printf("Error: failed to set addr format, code %d.\n", retval);
+				goto out;
+			}
+			if ((retval = ioctl(fd, IVI_IOC_ADJACENT, (void*)(&rule.adjacent))) < 0) {
+				printf("Error: failed to set adjacent parameter, code %d.\n", retval);
+				goto out;
+			}
+		}
+		printf("Info: successfully set local address format.\n");
+	}
+	
+	// Start IVI
+	if (!hgw && !nat44) {
 		if ((retval = ioctl(fd, IVI_IOC_CORE, 0)) < 0) {
 			printf("Error: failed to set stateless core mode, code %d.\n", retval);
-			exit(-1);
+			goto out;
 		}
-		
 		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
 			printf("Error: failed to start IVI module, code %d.\n", retval);
-			exit(-1);
+			goto out;
 		}
-		
-		printf("Info: successfully started IVI module.\n");
-	}
-	else if ((argc == 8) && (strcmp(argv[1], "start") == 0)) {
-		// Set dev
-		strncpy(v4dev, argv[2], IVI_IOCTL_LEN);
-		strncpy(v6dev, argv[3], IVI_IOCTL_LEN);
-		if ((retval = ioctl(fd, IVI_IOC_V4DEV, v4dev)) < 0) {
-			printf("Error: failed to assign IPv4 device, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6DEV, v6dev)) < 0) {
-			printf("Error: failed to assign IPv6 device, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v4 network
-		if ((retval = inet_pton(AF_INET, argv[4], (void*)(&(rule.prefix4)))) != 1) {
-			printf("Error: failed to parse IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V4NET, &(rule.prefix4))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen4 = atoi(argv[5]);
-		mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
-		if ((retval = ioctl(fd, IVI_IOC_V4MASK, &(mask))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v6 network
-		if ((retval = inet_pton(AF_INET6, argv[6], (void*)(&(rule.prefix6)))) != 1) {
-			printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6NET, &(rule.prefix6))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen6 = atoi(argv[7]);
-		temp = rule.plen6 >> 3;  // counted in bytes
-		if ((retval = ioctl(fd, IVI_IOC_V6MASK, &(temp))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-
-		// Insert default prefix mapping rule
-		rule.prefix4 = 0;
-		rule.plen4 = 0;
-		rule.format = ADDR_FMT_NONE;
-		if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-			printf("Error: failed to add default prefix mapping rule, code %d.\n", retval);
-			exit(-1);
-		}
-
-		// Start ivi
+	} else if (hgw && !nat44) {
 		if ((retval = ioctl(fd, IVI_IOC_NONAT, 0)) < 0) {
 			printf("Error: failed to disable nat44, code %d.\n", retval);
-			exit(-1);
+			goto out;
 		}
-		
 		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
 			printf("Error: failed to start IVI module, code %d.\n", retval);
-			exit(-1);
+			goto out;
 		}
-		
-		printf("Info: successfully started IVI module.\n");
-	}
-	else if ((argc == 9) && (strcmp(argv[1], "start") == 0)) {
-		// Set dev
-		strncpy(v4dev, argv[2], IVI_IOCTL_LEN);
-		strncpy(v6dev, argv[3], IVI_IOCTL_LEN);
-		if ((retval = ioctl(fd, IVI_IOC_V4DEV, v4dev)) < 0) {
-			printf("Error: failed to assign IPv4 device, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6DEV, v6dev)) < 0) {
-			printf("Error: failed to assign IPv6 device, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v4 network
-		if ((retval = inet_pton(AF_INET, argv[4], (void*)(&(rule.prefix4)))) != 1) {
-			printf("Error: failed to parse IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V4NET, &(rule.prefix4))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen4 = atoi(argv[5]);
-		mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
-		if ((retval = ioctl(fd, IVI_IOC_V4MASK, &(mask))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v4 public address for nat44
-		if ((retval = inet_pton(AF_INET, argv[6], (void*)(&v4addr))) != 1) {
-			printf("Error: failed to parse IPv4 public address, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V4PUB, &(v4addr.s_addr))) < 0) {
-			printf("Error: failed to assign IPv4 public address, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v6 network
-		if ((retval = inet_pton(AF_INET6, argv[7], (void*)(&(rule.prefix6)))) != 1) {
-			printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6NET, &(rule.prefix6))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen6 = atoi(argv[8]);
-		temp = rule.plen6 >> 3;  /* counted in bytes */
-		if ((retval = ioctl(fd, IVI_IOC_V6MASK, &(temp))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-
-		// Insert default prefix mapping rule
-		rule.prefix4 = 0;
-		rule.plen4 = 0;
-		rule.format = ADDR_FMT_NONE;
-		if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-			printf("Error: failed to add default prefix mapping rule, code %d.\n", retval);
-			exit(-1);
-		}
-
-		// Start ivi
+	} else if (hgw && nat44) {
 		if ((retval = ioctl(fd, IVI_IOC_NAT, 0)) < 0) {
 			printf("Error: failed to enable nat44, code %d.\n", retval);
-			exit(-1);
+			goto out;
 		}
-		
 		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
 			printf("Error: failed to start IVI module, code %d.\n", retval);
-			exit(-1);
+			goto out;
 		}
-		
-		printf("Info: successfully started IVI module.\n");
+	} else {
+		close(fd);
+		usage(EXIT_FAILURE);
 	}
-	else if ((argc == 10) && (strcmp(argv[1], "start") == 0)) {
-		// Set dev
-		strncpy(v4dev, argv[2], IVI_IOCTL_LEN);
-		strncpy(v6dev, argv[3], IVI_IOCTL_LEN);
-		if ((retval = ioctl(fd, IVI_IOC_V4DEV, v4dev)) < 0) {
-			printf("Error: failed to assign IPv4 device, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6DEV, v6dev)) < 0) {
-			printf("Error: failed to assign IPv6 device, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v4 network
-		if ((retval = inet_pton(AF_INET, argv[4], (void*)(&(rule.prefix4)))) != 1) {
-			printf("Error: failed to parse IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V4NET, &(rule.prefix4))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen4 = atoi(argv[5]);
-		mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
-		if ((retval = ioctl(fd, IVI_IOC_V4MASK, &(mask))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v6 network
-		if ((retval = inet_pton(AF_INET6, argv[6], (void*)(&(rule.prefix6)))) != 1) {
-			printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6NET, &(rule.prefix6))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen6 = atoi(argv[7]);
-		temp = rule.plen6 >> 3;  /* counted in bytes */
-		if ((retval = ioctl(fd, IVI_IOC_V6MASK, &(temp))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
+	
+	printf("Info: successfully started IVI module.\n");
 
-		// Insert rule
-		rule.prefix4 = ntohl(rule.prefix4);
-		rule.prefix4 = rule.prefix4 & mask;
-		rule.format = ADDR_FMT_SUFFIX;
-		if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-			printf("Error: failed to add prefix mapping rule, code %d.\n", retval);
-			exit(-1);
-		}
-
-		memset(&rule, 0, sizeof(rule));
-		// Set v6 default prefix
-		if ((retval = inet_pton(AF_INET6, argv[8], (void*)(&(rule.prefix6)))) != 1) {
-			printf("Error: failed to parse IPv6 default prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen6 = atoi(argv[9]);
-		rule.format = ADDR_FMT_NONE;
-		
-		// Insert default prefix mapping rule
-		if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-			printf("Error: failed to add default prefix mapping rule, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Start ivi
-		if ((retval = ioctl(fd, IVI_IOC_NONAT, 0)) < 0) {
-			printf("Error: failed to disable nat44, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
-			printf("Error: failed to start IVI module, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		printf("Info: successfully started IVI module.\n");
-	}
-	else if ((argc == 11) && (strcmp(argv[1], "start") == 0)) {
-		// Set dev
-		strncpy(v4dev, argv[2], IVI_IOCTL_LEN);
-		strncpy(v6dev, argv[3], IVI_IOCTL_LEN);
-		if ((retval = ioctl(fd, IVI_IOC_V4DEV, v4dev)) < 0) {
-			printf("Error: failed to assign IPv4 device, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6DEV, v6dev)) < 0) {
-			printf("Error: failed to assign IPv6 device, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v4 network
-		if ((retval = inet_pton(AF_INET, argv[4], (void*)(&(rule.prefix4)))) != 1) {
-			printf("Error: failed to parse IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V4NET, &(rule.prefix4))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen4 = atoi(argv[5]);
-		mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
-		if ((retval = ioctl(fd, IVI_IOC_V4MASK, &(mask))) < 0) {
-			printf("Error: failed to assign IPv4 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v4 public address for nat44
-		if ((retval = inet_pton(AF_INET, argv[6], (void*)(&v4addr))) != 1) {
-			printf("Error: failed to parse IPv4 public address, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V4PUB, &(v4addr.s_addr))) < 0) {
-			printf("Error: failed to assign IPv4 public address, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Set v6 network
-		if ((retval = inet_pton(AF_INET6, argv[7], (void*)(&(rule.prefix6)))) != 1) {
-			printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		if ((retval = ioctl(fd, IVI_IOC_V6NET, &(rule.prefix6))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen6 = atoi(argv[8]);
-		temp = rule.plen6 >> 3;  /* counted in bytes */
-		if ((retval = ioctl(fd, IVI_IOC_V6MASK, &(temp))) < 0) {
-			printf("Error: failed to assign IPv6 network prefix length, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		// Insert rule
-		rule.prefix4 = ntohl(rule.prefix4);
-		rule.prefix4 = rule.prefix4 & mask;
-		rule.format = ADDR_FMT_SUFFIX;
-		if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-			printf("Error: failed to add prefix mapping rule, code %d.\n", retval);
-			exit(-1);
-		}
-
-		memset(&rule, 0, sizeof(rule));
-		// Set v6 default prefix
-		if ((retval = inet_pton(AF_INET6, argv[9], (void*)(&(rule.prefix6)))) != 1) {
-			printf("Error: failed to parse IPv6 default prefix, code %d.\n", retval);
-			exit(-1);
-		}
-		rule.plen6 = atoi(argv[10]);
-		rule.format = ADDR_FMT_NONE;
-		
-		// Insert default prefix mapping rule
-		if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-			printf("Error: failed to add default prefix mapping rule, code %d.\n", retval);
-			exit(-1);
-		}
-
-		// Start ivi
-		if ((retval = ioctl(fd, IVI_IOC_NAT, 0)) < 0) {
-			printf("Error: failed to enable nat44, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		if ((retval = ioctl(fd, IVI_IOC_START, 0)) < 0) {
-			printf("Error: failed to start IVI module, code %d.\n", retval);
-			exit(-1);
-		}
-		
-		printf("Info: successfully started IVI module.\n");
-	}
-	else if ((argc == 2) && (strcmp(argv[1], "stop") == 0)) {
-		if ((retval = ioctl(fd, IVI_IOC_STOP, 0)) != 0) {
-			printf("Error: failed to stop IVI module, code %d.\n", retval);
-		}
-		else {
-			printf("Info: successfully stopped IVI module.\n");
-		}
-	}
-	else if ((argc == 5) && (strcmp(argv[1], "format") == 0)) {
-		unsigned short postfix[2];
-		unsigned short adjacent;
-		postfix[0] = atoi(argv[3]);
-		postfix[1] = atoi(argv[4]);
-		adjacent = 1;
-		if (strcmp(argv[2], "postfix") == 0) {
-			if ((retval = ioctl(fd, IVI_IOC_POSTFIX, postfix)) < 0) {
-				printf("Error: failed to set addr format, code %d.\n", retval);
-				exit(-1);
-			}
-			if ((retval = ioctl(fd, IVI_IOC_ADJACENT, (void*)(&adjacent))) < 0) {
-				printf("Error: failed to set adjacent parameter, code %d.\n", retval);
-				exit(-1);
-			}
-		}
-		else if (strcmp(argv[2], "suffix") == 0) {
-			if ((retval = ioctl(fd, IVI_IOC_SUFFIX, postfix)) < 0) {
-				printf("Error: failed to set addr format, code %d.\n", retval);
-				exit(-1);
-			}
-			if ((retval = ioctl(fd, IVI_IOC_ADJACENT, (void*)(&adjacent))) < 0) {
-				printf("Error: failed to set adjacent parameter, code %d.\n", retval);
-				exit(-1);
-			}
-		}
-		else {
-			printf("Error: unknown address format name %s.\n", argv[2]);
-			exit(-1);
-		}
-		printf("Info: successfully set address format.\n");
-	}
-	else if ((argc == 6) && (strcmp(argv[1], "format") == 0)) {
-		unsigned short postfix[2];
-		unsigned short adjacent;
-		postfix[0] = atoi(argv[3]);
-		postfix[1] = atoi(argv[4]);
-		adjacent = atoi(argv[5]);
-		if (strcmp(argv[2], "suffix") == 0) {
-			if ((retval = ioctl(fd, IVI_IOC_SUFFIX, postfix)) < 0) {
-				printf("Error: failed to set addr format, code %d.\n", retval);
-				exit(-1);
-			}
-			if ((retval = ioctl(fd, IVI_IOC_ADJACENT, (void*)(&adjacent))) < 0) {
-				printf("Error: failed to set adjacent parameter, code %d.\n", retval);
-				exit(-1);
-			}
-		}
-		else {
-			printf("Error: unknown address format name %s.\n", argv[2]);
-			exit(-1);
-		}
-		printf("Info: successfully set address format.\n");
-	}
-	else if ((argc == 4) && (strcmp(argv[1], "mss") == 0)) {
-		unsigned short mss_val;
-		mss_val = atoi(argv[3]);
-		if (strcmp(argv[2], "limit") == 0) {
-			if ((retval = ioctl(fd, IVI_IOC_MSS_LIMIT, (void*)(&mss_val))) < 0) {
-				printf("Error: failed to set mss limit, code %d.\n", retval);
-				exit(-1);
-			}
-		}
-		else {
-			printf("Error: unknown mss option type '%s'.\n", argv[2]);
-			exit(-1);
-		}
-		printf("Info: successfully set mss.\n");
-	}
-	else if ((argc == 6) && (strcmp(argv[1], "rule") == 0)) {
-		memset(&rule, 0, sizeof(rule));
-		
-		if (strcmp(argv[2], "add") == 0 && strcmp(argv[3], "default") == 0) {
-			rule.prefix4 = 0;
-			rule.plen4 = 0;
-		
-			if ((retval = inet_pton(AF_INET6, argv[4], (void*)(&(rule.prefix6)))) != 1) {
-				printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-				exit(-1);
-			}
-			rule.plen6 = atoi(argv[5]);
-			rule.ratio = 1;
-			rule.adjacent = 1;
-
-			// Insert rule
-			if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-				printf("Error: failed to add prefix mapping rule, code %d.\n", retval);
-				exit(-1);
-			}
-			printf("Info: successfully add rule.\n");
-		} else {
-			printf("Error: unknown rule command '%s'.\n", argv[2]);
-			exit(-1);
-		}
-	}
-	else if ((argc == 7) && (strcmp(argv[1], "rule") == 0)) {
-		memset(&rule, 0, sizeof(rule));
-		
-		if (strcmp(argv[2], "add") == 0) {
-			if ((retval = inet_pton(AF_INET, argv[3], (void*)(&(rule.prefix4)))) != 1) {
-				printf("Error: failed to parse IPv4 prefix, code %d.\n", retval);
-				exit(-1);
-			}
-			rule.plen4 = atoi(argv[4]);
-			mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
-			rule.prefix4 = ntohl(rule.prefix4);
-			rule.prefix4 = rule.prefix4 & mask;
-		
-			if ((retval = inet_pton(AF_INET6, argv[5], (void*)(&(rule.prefix6)))) != 1) {
-				printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-				exit(-1);
-			}
-			rule.plen6 = atoi(argv[6]);
-			rule.ratio = 1;
-			rule.adjacent = 1;
-			rule.format = ADDR_FMT_NONE;
-
-			// Insert rule
-			if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-				printf("Error: failed to add prefix mapping rule, code %d.\n", retval);
-				exit(-1);
-			}
-			printf("Info: successfully add rule.\n");
-		} else {
-			printf("Error: unknown rule command '%s'.\n", argv[2]);
-			exit(-1);
-		}
-	}
-	else if ((argc == 9) && (strcmp(argv[1], "rule") == 0)) {
-		memset(&rule, 0, sizeof(rule));
-		
-		if (strcmp(argv[2], "add") == 0) {
-			if ((retval = inet_pton(AF_INET, argv[3], (void*)(&(rule.prefix4)))) != 1) {
-				printf("Error: failed to parse IPv4 prefix, code %d.\n", retval);
-				exit(-1);
-			}
-			rule.plen4 = atoi(argv[4]);
-			mask = (rule.plen4 == 0) ? 0 : 0xffffffff << (32 - rule.plen4);
-			rule.prefix4 = ntohl(rule.prefix4);
-			rule.prefix4 = rule.prefix4 & mask;
-		
-			if ((retval = inet_pton(AF_INET6, argv[5], (void*)(&(rule.prefix6)))) != 1) {
-				printf("Error: failed to parse IPv6 network prefix, code %d.\n", retval);
-				exit(-1);
-			}
-			rule.plen6 = atoi(argv[6]);
-			rule.ratio = atoi(argv[7]);
-			rule.adjacent = atoi(argv[8]);
-			rule.format = ADDR_FMT_SUFFIX;
-
-			// Insert rule
-			if ((retval = ioctl(fd, IVI_IOC_ADD_RULE, &rule)) < 0) {
-				printf("Error: failed to add prefix mapping rule, code %d.\n", retval);
-				exit(-1);
-			}
-			printf("Info: successfully add rule.\n");
-		} else {
-			printf("Error: unknown rule command '%s'.\n", argv[2]);
-			exit(-1);
-		}
-	}
-	else {
-		printf("Usage: ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len]\n");
-		printf("       ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len] [default_prefix] [default_prefix_len]\n");
-		printf("       ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v4_public_addr] [v6_prefix] [v6_prefix_len]\n");
-		printf("       ivictl start [v4_dev] [v6_dev] [v4_prefix] [v4_prefix_len] [v4_public_addr] [v6_prefix] [v6_prefix_len] [default_prefix] [default_prefix_len]\n");
-		printf("       ivictl format postfix [ratio] [offset]\n");
-		printf("       ivictl format suffix [ratio] [offset]\n");
-		printf("       ivictl format suffix [ratio] [offset] [adjacent]\n");
-		printf("       ivictl mss limit [mss_val]\n");
-		printf("       ivictl start [v4_dev] [v6_dev]\n");
-		printf("       ivictl rule add default [v6_prefix] [v6_prefix_len]\n");
-		printf("       ivictl rule add [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len]\n");
-		printf("       ivictl rule add [v4_prefix] [v4_prefix_len] [v6_prefix] [v6_prefix_len] [ratio] [adjacent]\n");
-		printf("       ivictl stop\n");
-	}
-
+out:
 	close(fd);
-
 	return retval;
 }
