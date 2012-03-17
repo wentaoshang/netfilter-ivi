@@ -25,12 +25,8 @@
 /* map list structure */
 struct tcp_map_list {
 	spinlock_t lock;
-#ifdef IVI_HASH
 	struct hlist_head out_chain[IVI_HTABLE_SIZE];  // Map table from oldport to newport
 	struct hlist_head in_chain[IVI_HTABLE_SIZE];   // Map table from newport to oldport
-#else
-	struct list_head chain;
-#endif
 	int size;
 	__be16 last_alloc;  // Save the last allocated port number
 };

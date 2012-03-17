@@ -110,7 +110,7 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 		
 		case IVI_IOC_NONAT:
 			ivi_mode = IVI_MODE_HGW;
-			printk(KERN_INFO "ivi_ioctl: ivi_mode set to hgw with nat44 disabled.\n");
+			printk(KERN_INFO "ivi_ioctl: ivi_mode set to hgw without nat44.\n");
 			break;
 
 		case IVI_IOC_ADJACENT:
@@ -187,14 +187,14 @@ static int ivi_ioctl(struct inode *inode, struct file *file, unsigned int cmd, u
 
 static int ivi_open(struct inode *inode, struct file *file) {
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "a new virtual device is opened for ioctl.\n");
+	printk(KERN_DEBUG "IVI: virtual device is opened for ioctl.\n");
 #endif
 	return 0;
 }
 
 static int ivi_release(struct inode *inode, struct file *file) {
 #ifdef IVI_DEBUG
-	printk(KERN_DEBUG "a virtual device for ioctl is closed.\n");
+	printk(KERN_DEBUG "IVI: virtual device is closed.\n");
 #endif
 	return 0;
 }

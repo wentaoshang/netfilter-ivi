@@ -78,14 +78,14 @@ static int ipaddr_4to6(unsigned int *v4addr, u16 port, struct in6_addr *v6addr, 
 		suffix = hgw_suffix;
 	} else {
 		if (ivi_rule_lookup(addr, v6addr, &prefixlen, &ratio, &adjacent, &fmt) != 0) {
-#ifdef IVI_DEBUG_MAP
+#ifdef IVI_DEBUG_RULE
 			printk(KERN_DEBUG "ipaddr_4to6: failed to map v4 addr " NIP4_FMT "\n", NIP4(addr));
 #endif
 			return -1;
 		}
 		prefixlen = prefixlen >> 3; /* counted in bytes */
 		if (fmt != ADDR_FMT_NONE && ratio && adjacent) {
-			offset = (port / ratio) % adjacent;
+			offset = (port / adjacent) % ratio;
 			suffix = fls(ratio) - 1;
 			suffix = suffix << 12;
 			suffix += offset & 0x0fff;
@@ -118,7 +118,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 
 	if (link_local_addr(v6addr)) {
 		// Do not translate ipv6 link local address.
-#ifdef IVI_DEBUG_MAP
+#ifdef IVI_DEBUG_RULE
 		printk(KERN_DEBUG "ipaddr_6to4: ignore link local address.\n");
 #endif
 		return -1;
@@ -129,7 +129,7 @@ static int ipaddr_6to4(struct in6_addr *v6addr, unsigned int *v4addr, u16 *ratio
 		prefixlen = v6prefixlen;
 	} else {
 		if (ivi_rule6_lookup(v6addr, &prefixlen, ratio, adjacent, &fmt) != 0) {
-#ifdef IVI_DEBUG_MAP
+#ifdef IVI_DEBUG_RULE
 			printk(KERN_DEBUG "ipaddr_6to4: failed to map v6 addr " NIP6_FMT "\n", NIP6(*v6addr));
 #endif
 			return -1;
@@ -174,20 +174,24 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 	eth4 = eth_hdr(skb);
 	if (unlikely(eth4->h_proto != __constant_ntohs(ETH_P_IP))) {
 		// This should not happen since we are hooked on PF_INET.
+#ifdef IVI_DEBUG
 		printk(KERN_ERR "ivi_v4v6_xmit: non-IPv4 packet type %x received on IPv4 hook.\n", ntohs(eth4->h_proto));
+#endif
 		return NF_ACCEPT;  // Just accept.
 	}
 
 	ip4h = ip_hdr(skb);
 	if (ipv4_is_multicast(ip4h->daddr) || ipv4_is_lbcast(ip4h->daddr) || ipv4_is_loopback(ip4h->daddr)) {
 		// By pass multicast packet
-		//printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 multicast/broadcast/loopback dest address.\n");
+		//printk(KERN_DEBUG "ivi_v4v6_xmit: by pass ipv4 multicast/broadcast/loopback dest address.\n");
 		return NF_ACCEPT;  // Just accept.
 	}
 
 	if (ivi_mode >= IVI_MODE_HGW && addr_in_v4network(&(ip4h->daddr))) {
 		// Do not translate ipv4 packets (hair pin) that are toward v4network.
-		printk(KERN_ERR "ivi_v4v6_xmit: IPv4 packet toward the v4 network bypassed in HGW mode.\n");
+#ifdef IVI_DEBUG
+		printk(KERN_DEBUG "ivi_v4v6_xmit: IPv4 packet toward the v4 network bypassed in HGW mode.\n");
+#endif
 		return NF_ACCEPT;  // Just accept.
 	}
 
@@ -196,7 +200,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 		// drop the packet and send ICMPv4 error message to the source of the packet.
 		// Translating it will cause kernel to send ICMPv6 error message on v4dev
 		// interface, which will never be received.
-		//printk(KERN_ERR "ivi_v4v6_xmit: by pass ipv4 packet with TTL = 1.\n");
+		//printk(KERN_DEBUG "ivi_v4v6_xmit: by pass ipv4 packet with TTL = 1.\n");
 		return NF_ACCEPT;  // Just accept.
 	}
 
@@ -210,7 +214,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 
 			if (ivi_mode >= IVI_MODE_HGW) {
 				if (get_outflow_tcp_map_port(ntohl(ip4h->saddr), ntohs(tcph->source), hgw_ratio, hgw_adjacent, hgw_offset, tcph, plen, &newp) == -1) {
-					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for " NIPQUAD_FMT ":%d (TCP).\n", NIPQUAD(ip4h->saddr), ntohs(tcph->source));
+					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform port mapping for " NIPQUAD_FMT ":%d (TCP).\n", NIPQUAD(ip4h->saddr), ntohs(tcph->source));
 					// Just let the packet pass with original address.
 				} else {
 					if (ivi_mode == IVI_MODE_HGW_NAT44) {
@@ -230,7 +234,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 
 			if (ivi_mode >= IVI_MODE_HGW) {
 				if (get_outflow_map_port(&udp_list, ntohl(ip4h->saddr), ntohs(udph->source), hgw_ratio, hgw_adjacent, hgw_offset, &newp) == -1) {
-					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for " NIPQUAD_FMT ":%d (UDP).\n", NIPQUAD(ip4h->saddr), ntohs(udph->source));
+					printk(KERN_ERR "ivi_v4v6_xmit: fail to perform port mapping for " NIPQUAD_FMT ":%d (UDP).\n", NIPQUAD(ip4h->saddr), ntohs(udph->source));
 					// Just let the packet pass with original address.
 				} else {
 					if (ivi_mode == IVI_MODE_HGW_NAT44) {
@@ -251,7 +255,7 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 			if (icmph->type == ICMP_ECHO || icmph->type == ICMP_ECHOREPLY) {
 				if (ivi_mode >= IVI_MODE_HGW) {
 					if (get_outflow_map_port(&icmp_list, ntohl(ip4h->saddr), ntohs(icmph->un.echo.id), hgw_ratio, hgw_adjacent, hgw_offset, &newp) == -1) {
-						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform nat44 mapping for " NIPQUAD_FMT ":%d (ICMP).\n", NIPQUAD(ip4h->saddr), ntohs(icmph->un.echo.id));
+						printk(KERN_ERR "ivi_v4v6_xmit: fail to perform id mapping for " NIPQUAD_FMT ":%d (ICMP).\n", NIPQUAD(ip4h->saddr), ntohs(icmph->un.echo.id));
 						// Just let the packet pass with original address.
 					} else {
 						if (ivi_mode == IVI_MODE_HGW_NAT44) {
@@ -263,15 +267,15 @@ int ivi_v4v6_xmit(struct sk_buff *skb) {
 				}
 				s_port = d_port = ntohs(icmph->un.echo.id);
 			} else {
-				printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type %d in NAT44. Drop packet.\n", icmph->type);
+				printk(KERN_ERR "ivi_v4v6_xmit: unsupported ICMP type %d in port mapping. Drop packet.\n", icmph->type);
 				return NF_DROP;
 			}
 
 			break;
 
 		default:
-			printk(KERN_ERR "ivi_v4v6_xmit: unsupported protocol %d for nat44 operation.\n", ip4h->protocol);
-			// Just let the packet pass with original address.
+			printk(KERN_ERR "ivi_v4v6_xmit: unsupported protocol %d in port mapping.\n", ip4h->protocol);
+			// Just let the packet pass with original address and port.
 	}
 
 	hlen = sizeof(struct ipv6hdr);
@@ -379,14 +383,16 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 	eth6 = eth_hdr(skb);
 	if (unlikely(eth6->h_proto != __constant_ntohs(ETH_P_IPV6))) {
 		// This should not happen since we are hooked on PF_INET6.
+#ifdef IVI_DEBUG
 		printk(KERN_ERR "ivi_v6v4_xmit: non-IPv6 packet type %x received on IPv6 hook.\n", ntohs(eth6->h_proto));
+#endif
 		return NF_ACCEPT;  // Just accept.
 	}
 
 	ip6h = ipv6_hdr(skb);
 	if (mc_v6_addr(&(ip6h->daddr))) {
 		// By pass ipv6 multicast packet (for ND)
-		//printk(KERN_ERR "ivi_v6v4_xmit: by pass ipv6 multicast packet, possibly ND packet.\n");
+		//printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 multicast packet, possibly ND packet.\n");
 		return NF_ACCEPT;
 	}
 
@@ -395,7 +401,7 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 		// drop the packet and send ICMPv6 error message to the source of the packet.
 		// Translating it will cause kernel to send ICMPv4 error message on v6dev 
 		// interface, which will never be received.
-		//printk(KERN_ERR "ivi_v6v4_xmit: by pass ipv6 packet with hop limit = 1.\n");
+		//printk(KERN_DEBUG "ivi_v6v4_xmit: by pass ipv6 packet with hop limit = 1.\n");
 		return NF_ACCEPT;  // Just accept.
 	}
 
@@ -438,7 +444,9 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				__be16 oldp;
 				
 				if (get_inflow_tcp_map_port(ntohs(tcph->dest), tcph, plen, &oldaddr, &oldp) == -1) {
-					//printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (TCP).\n", ntohs(tcph->dest));
+#ifdef IVI_DEBUG_MAP
+					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform port mapping for %d (TCP).\n", ntohs(tcph->dest));
+#endif
 					goto free_drop;
 				} else {
 					// DNAT-PT
@@ -485,7 +493,9 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 				__be16 oldp;
 
 				if (get_inflow_map_port(&udp_list,  ntohs(udph->dest), &oldaddr, &oldp) == -1) {
-					//printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (UDP).\n", ntohs(udph->dest));
+#ifdef IVI_DEBUG_MAP
+					printk(KERN_ERR "ivi_v6v4_xmit: fail to perform port mapping for %d (UDP).\n", ntohs(udph->dest));
+#endif
 					goto free_drop;
 				} else {
 					// DNAT-PT
@@ -527,7 +537,9 @@ int ivi_v6v4_xmit(struct sk_buff *skb) {
 					__be16 oldp;
 
 					if (get_inflow_map_port(&icmp_list, ntohs(icmph->un.echo.id), &oldaddr, &oldp) == -1) {
-						//printk(KERN_ERR "ivi_v6v4_xmit: fail to perform nat44 mapping for %d (ICMP).\n", ntohs(icmph->un.echo.id));
+#ifdef IVI_DEBUG_MAP
+						printk(KERN_ERR "ivi_v6v4_xmit: fail to perform id mapping for %d (ICMP).\n", ntohs(icmph->un.echo.id));
+#endif
 						goto free_drop;
 					} else {
 						// DNAT-PT

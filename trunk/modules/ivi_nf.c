@@ -57,7 +57,7 @@ struct nf_hook_ops v6_ops = {
 int nf_running(const int run) {
 	running = run;
 #ifdef IVI_DEBUG
-	printk(KERN_ERR "set running state to %d.\n", running);
+	printk(KERN_DEBUG "IVI: set running state to %d.\n", running);
 #endif
 	return running;
 }
@@ -81,7 +81,7 @@ int ivi_nf_init(void) {
 	nf_register_hook(&v6_ops);
 
 #ifdef IVI_DEBUG
-	printk(KERN_ERR "IVI: ivi_nf loaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_nf loaded.\n");
 #endif
 	return 0;
 }
@@ -99,6 +99,6 @@ void ivi_nf_exit(void) {
 		dev_put(v6_dev);
 
 #ifdef IVI_DEBUG
-	printk(KERN_ERR "IVI: ivi_nf unloaded.\n");
+	printk(KERN_DEBUG "IVI: ivi_nf unloaded.\n");
 #endif
 }

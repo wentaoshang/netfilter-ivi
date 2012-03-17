@@ -21,12 +21,8 @@
 
 /* map entry structure */
 struct map_tuple {
-#ifdef IVI_HASH
 	struct hlist_node out_node;  // Inserted to out_chain
 	struct hlist_node in_node;   // Inserted to in_chain
-#else
-	struct list_head node;
-#endif
 	__be32 oldaddr;
 	__be16 oldport;
 	__be16 newport;
@@ -36,12 +32,8 @@ struct map_tuple {
 /* map list structure */
 struct map_list {
 	spinlock_t lock;
-#ifdef IVI_HASH
 	struct hlist_head out_chain[IVI_HTABLE_SIZE];  // Map table from oldport to newport
 	struct hlist_head in_chain[IVI_HTABLE_SIZE];   // Map table from newport to oldport
-#else
-	struct list_head chain;
-#endif
 	int size;
 	__be16 last_alloc;  // Save the last allocate port number
 	time_t timeout;
